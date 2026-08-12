@@ -16,6 +16,7 @@ binds.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Awaitable, Callable
 
@@ -356,7 +357,9 @@ async def gated_auth_middleware(
     bearer = _extract_bearer(request)
     if bearer:
         try:
-            bearer_session = _verify_bearer(request, access_token=bearer)
+            bearer_session = await asyncio.to_thread(
+                _verify_bearer, request, access_token=bearer
+            )
         except ProviderError as e:
             # At least one provider's IDP/JWKS was unreachable and none
             # verified the token — transient outage, not bad credentials.
@@ -421,7 +424,9 @@ async def gated_auth_middleware(
         unreachable_provider: str | None = None
         for provider in _ordered_session_providers(provider_hint):
             try:
-                session = provider.verify_session(access_token=at)
+                session = await asyncio.to_thread(
+                    provider.verify_session, access_token=at
+                )
             except ProviderError as e:
                 _log.warning(
                     "dashboard-auth: provider %r unreachable during verify: %s",
