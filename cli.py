@@ -4856,6 +4856,27 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             or os.getenv("HERMES_INFERENCE_PROVIDER")
             or "auto"
         )
+        # `--provider <custom>` without `-m` must use that entry's
+        # default_model. Otherwise the global model.default is sent to the
+        # custom endpoint and the compressor inherits the wrong context
+        # length (#86978). Explicit `-m` still wins.
+        if not model and provider:
+            try:
+                from hermes_cli.runtime_provider import _get_named_custom_provider
+
+                _named_custom = _get_named_custom_provider(provider)
+            except Exception as exc:
+                logger.warning(
+                    "Could not resolve --provider %s default model; "
+                    "keeping global model.default (%s)",
+                    provider,
+                    exc,
+                )
+                _named_custom = None
+            _provider_default = str((_named_custom or {}).get("model") or "").strip()
+            if _provider_default:
+                self.model = _provider_default
+                self._model_is_default = False
         self._provider_source: Optional[str] = None
         self.provider = self.requested_provider
         self.api_mode = "chat_completions"
@@ -19868,6 +19889,14 @@ def main(
         # agent must wait the full MCP cold-start bound before its first
         # (and only) tool snapshot. See #51316.
         cli._single_query_mode = True
+        # Mark single-query for the approval gate. cli.py sets
+        # HERMES_INTERACTIVE earlier for interactive sudo prompts, but a -q
+        # run has NO user waiting to answer approval prompts. The gate reads
+        # this marker (via gateway.session_context.get_session_env, which falls
+        # back to os.environ when the session-context layer isn't engaged) and
+        # takes the deterministic approvals.single_query_mode path instead of
+        # waiting the full timeout. See #86878.
+        os.environ["HERMES_SINGLE_QUERY_SESSION"] = "1"
         if not cli._claim_active_session("cli", stderr=bool(quiet)):
             sys.exit(1)
         try:
