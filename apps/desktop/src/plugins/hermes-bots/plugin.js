@@ -1516,6 +1516,13 @@ function McpSetupButton({ profile, entry, onDone, ensureProfile }) {
   }
 
   const beginOAuth = async () => {
+    // A second click (retry, impatient double-click) must not orphan the
+    // previous poll interval — an overwritten pollRef leaks a 2s poller that
+    // runs until unmount and can flip phase from a stale OAuth session.
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
     setPhase('busy')
     setMessage('')
     const profile = await resolveProfile()
@@ -5997,11 +6004,30 @@ async function invalidateRoutineOwner(profile) {
 function selectRoutineJobs(data, error, lastJobs, bot) {
   const live = Array.isArray(data?.jobs) ? data.jobs : null
   const all = live ?? (error ? lastJobs : [])
+  const scopedToBot = normalizedProfileName(data?.scoped) === normalizedProfileName(bot)
   return {
     live,
     all,
-    jobs: all.filter(job => routineBot(job) === bot)
+    jobs: scopedToBot ? all : all.filter(job => (routineBot(job) || 'default') === bot)
   }
+}
+
+/**
+ * Why the Routines pane can be empty while the bot's cron store has jobs.
+ *
+ * On older gateways the pane only shows jobs namespaced `[bot:<name>]` for the
+ * active bot (plus untagged legacy jobs on the default bot). When jobs exist in
+ * the store but none surface for this bot, the user is left staring at the
+ * generic empty state with no hint that cronjobs are present but hidden.
+ * Return a short explanation string in that case, or null when the store is
+ * genuinely empty (or the active bot's jobs are already shown).
+ */
+function routineFilterHint(all, jobs) {
+  if (jobs.length !== 0 || !Array.isArray(all) || all.length === 0) {
+    return null
+  }
+  return 'Cronjobs exist in this profile but none are tagged for this bot. ' +
+    'Name a job "[bot:<name>] …" to show it here, or see them in Cron below.'
 }
 
 function normalizedProfileName(profile) {
@@ -6549,6 +6575,7 @@ function RoutinesPane() {
   const staleNotice = error && !view.live && view.all.length
     ? 'Could not refresh cronjobs. Showing the last list we had.'
     : null
+  const filterHint = routineFilterHint(view.all, jobs)
 
   return jsxs('div', {
     className: 'flex h-full flex-col',
@@ -6629,13 +6656,15 @@ function RoutinesPane() {
                 jsx(Codicon, { name: 'calendar', className: 'text-[1.6rem] text-(--ui-text-quaternary)' }),
                 jsx('div', {
                   className: 'text-xs leading-5 text-(--ui-text-tertiary)',
-                  children: 'Cronjobs are recurring tasks this agent runs on a schedule.'
+                  children: filterHint
+                    ? filterHint
+                    : 'Cronjobs are recurring tasks this agent runs on a schedule.'
                 }),
                 jsx(Button, {
                   variant: 'secondary',
                   size: 'sm',
                   onClick: openCreate,
-                  children: 'Create Cronjob'
+                  children: filterHint ? 'Create a cronjob for this bot' : 'Create Cronjob'
                 })
               ]
             })
@@ -6647,14 +6676,15 @@ function RoutinesPane() {
               })
             }),
       jsx(CreateRoutineDialog, {
-        key: createTarget,
         bot: createTarget,
         open: createOpen,
         onClose: () => {
           setCreateOpen(false)
           setCreateOwner(null)
         }
-      })
+        // key is the jsx() THIRD argument — as a prop it is silently ignored
+        // and the dialog kept stale per-bot form state when the target changed.
+      }, createTarget)
     ]
   })
 }
@@ -7910,12 +7940,26 @@ export default {
     }
 
     // Routines follow the chat you're in: track the live gateway profile.
-    host.state.profile.listen(profile => {
+    // Capture the unbinds: without them a disable → re-enable cycle stacks a
+    // duplicate listener per cycle (same survives-disable class as the face
+    // clock before its onDispose hook — these kept firing until app restart).
+    const unbindProfileListener = host.state.profile.listen(profile => {
       if (profile && typeof profile === 'string') {
         $selectedBot.set(profile)
       }
     })
-    host.state.gateway.listen(handleSessionsGatewayTransition)
+    const unbindGatewayListener = host.state.gateway.listen(handleSessionsGatewayTransition)
+
+    if (typeof ctx.onDispose === 'function') {
+      ctx.onDispose(() => {
+        if (typeof unbindProfileListener === 'function') {
+          unbindProfileListener()
+        }
+        if (typeof unbindGatewayListener === 'function') {
+          unbindGatewayListener()
+        }
+      })
+    }
 
     // Reconciliation sweep: hide every Bot Mode session we know about, on
     // load and again on each reconnect (a swap can land on a gateway whose
