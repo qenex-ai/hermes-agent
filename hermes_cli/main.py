@@ -1779,6 +1779,127 @@ def _resolve_session_by_name_or_id(name_or_id: str) -> Optional[str]:
     return None
 
 
+def _create_titled_session(title: str) -> Optional[str]:
+    """Create a fresh session with the given title; return its session id.
+
+    Used by ``chat -c <title> --create-if-missing`` (#86794): programmatic
+    callers (plugins, scripts) that want "send to this named thread, making
+    it if needed" get a deterministic outcome instead of a silent no-op.
+
+    The session id follows the same timestamp+uuid shape the CLI uses for a
+    brand-new session; the title is recorded with user provenance so
+    auto-titling never overwrites it.
+    """
+    db = None
+    try:
+        import uuid as _uuid
+
+        from hermes_state import SessionDB
+
+        now = datetime.now()
+        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+        short_uuid = _uuid.uuid4().hex[:6]
+        new_session_id = f"{timestamp_str}_{short_uuid}"
+
+        db = SessionDB()
+        db.create_session(new_session_id, source="cli")
+        db.set_session_title(new_session_id, title)
+        return new_session_id
+    except Exception:
+        # Programmatic callers (the #86794 use case) rely on --create-if-missing
+        # being deterministic; swallow the failure to keep the error path simple,
+        # but log the underlying cause so it lands in errors.log and stays
+        # debuggable (DB lock, I/O error, import error — all otherwise invisible).
+        logger.exception("Failed to create titled session %r", title)
+        return None
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def _resolve_continue_arg(args, *, use_tui: bool) -> None:
+    """Resolve ``-c/--continue`` into ``args.resume``.
+
+    Handles both forms:
+    - ``-c <name>``: resolve by title/ID. On miss, fail loudly on **stderr**
+      (exit 1) so programmatic callers see the error even under quiet mode
+      (#86794); with ``--create-if-missing``, create a fresh titled session
+      and resume into it instead.
+    - bare ``-c``: continue this terminal's breadcrumb session if valid,
+      else the most recent session (workspace-scoped MRU, then global
+      fallback).
+    """
+    continue_val = getattr(args, "continue_last", None)
+    if continue_val and not getattr(args, "resume", None):
+        if isinstance(continue_val, str):
+            # -c "session name" — resolve by title or ID
+            resolved = _resolve_session_by_name_or_id(continue_val)
+            if resolved:
+                args.resume = resolved
+            elif getattr(args, "create_if_missing", False):
+                # --create-if-missing: no session matches the title — create a
+                # new session with that title and proceed. This is the
+                # programmatic-caller primitive ("send to this named thread,
+                # making it if needed"); without it a background/quiet send to
+                # a not-yet-existing named session silently no-ops (#86794).
+                new_sid = _create_titled_session(continue_val)
+                if new_sid:
+                    args.resume = new_sid
+                else:
+                    print(
+                        f"No session found matching '{continue_val}' and "
+                        "a new titled session could not be created.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+            else:
+                print(f"No session found matching '{continue_val}'.", file=sys.stderr)
+                print(
+                    "Use 'hermes sessions list' to see available sessions, or "
+                    "pass --create-if-missing to start a new session with that title.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        else:
+            # -c with no argument — prefer this terminal's own breadcrumb
+            # (written at session start / rotation) so side-by-side terminals
+            # each continue their own conversation. Falls back to the
+            # most-recent session when there is no valid breadcrumb, or when
+            # session.terminal_continue is false in config.yaml.
+            if getattr(args, "create_if_missing", False):
+                # --create-if-missing only makes sense with a named session;
+                # with a bare -c there is nothing to create, so surface the
+                # no-op to programmatic callers instead of silently ignoring it.
+                print(
+                    "--create-if-missing requires a session name: "
+                    "`-c <name> --create-if-missing`",
+                    file=sys.stderr,
+                )
+            try:
+                from hermes_cli.terminal_breadcrumbs import resolve_breadcrumb_session
+
+                _crumb_id = resolve_breadcrumb_session()
+            except Exception:
+                _crumb_id = None
+            if _crumb_id:
+                args.resume = _crumb_id
+            else:
+                # No valid breadcrumb — continue the most recent session
+                source = "tui" if use_tui else "cli"
+                last_id = _resolve_last_session(source=source)
+                if not last_id and source == "tui":
+                    last_id = _resolve_last_session(source="cli")
+                if last_id:
+                    args.resume = last_id
+                else:
+                    kind = "TUI" if use_tui else "CLI"
+                    print(f"No previous {kind} session found to continue.")
+                    sys.exit(1)
+
+
 def _read_tui_active_session_file(path: Optional[str]) -> Optional[str]:
     if not path:
         return None
@@ -2189,6 +2310,15 @@ def _ensure_tui_workspace(tui_dir: Path) -> None:
     sys.exit(1)
 
 
+def _npm_lifecycle_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Build a clean environment for the pinned UI toolchain lifecycle."""
+    run_env = {**os.environ, **(env or {}), "CI": "1"}
+    # esbuild treats this as an executable override. If a shell points it at a
+    # different release, the pinned package's postinstall rejects that binary.
+    run_env.pop("ESBUILD_BINARY_PATH", None)
+    return run_env
+
+
 def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
     """TUI: --dev → tsx src; else node dist (HERMES_TUI_DIR prebuilt or esbuild)."""
     _ensure_tui_node()
@@ -2319,7 +2449,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                env={**with_hermes_node_path(), "CI": "1"},
+                env=_npm_lifecycle_env(with_hermes_node_path()),
             )
 
         result = _run_tui_install()
@@ -2360,6 +2490,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=_npm_lifecycle_env(),
         )
         if result.returncode != 0:
             combined = f"{result.stdout or ''}{result.stderr or ''}".strip()
@@ -2390,6 +2521,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=_npm_lifecycle_env(),
         )
         if result.returncode != 0:
             combined = f"{result.stdout or ''}{result.stderr or ''}".strip()
@@ -2831,43 +2963,7 @@ def cmd_chat(args):
             sys.exit(1)
 
     # Resolve --continue into --resume with the latest session or by name
-    continue_val = getattr(args, "continue_last", None)
-    if continue_val and not getattr(args, "resume", None):
-        if isinstance(continue_val, str):
-            # -c "session name" — resolve by title or ID
-            resolved = _resolve_session_by_name_or_id(continue_val)
-            if resolved:
-                args.resume = resolved
-            else:
-                print(f"No session found matching '{continue_val}'.")
-                print("Use 'hermes sessions list' to see available sessions.")
-                sys.exit(1)
-        else:
-            # -c with no argument — prefer this terminal's own breadcrumb
-            # (written at session start / rotation) so side-by-side terminals
-            # each continue their own conversation. Falls back to the
-            # most-recent session when there is no valid breadcrumb, or when
-            # session.terminal_continue is false in config.yaml.
-            try:
-                from hermes_cli.terminal_breadcrumbs import resolve_breadcrumb_session
-
-                _crumb_id = resolve_breadcrumb_session()
-            except Exception:
-                _crumb_id = None
-            if _crumb_id:
-                args.resume = _crumb_id
-            else:
-                # No valid breadcrumb — continue the most recent session
-                source = "tui" if use_tui else "cli"
-                last_id = _resolve_last_session(source=source)
-                if not last_id and source == "tui":
-                    last_id = _resolve_last_session(source="cli")
-                if last_id:
-                    args.resume = last_id
-                else:
-                    kind = "TUI" if use_tui else "CLI"
-                    print(f"No previous {kind} session found to continue.")
-                    sys.exit(1)
+    _resolve_continue_arg(args, use_tui=use_tui)
 
     # --resume @claude / --resume @codex: import a foreign session (Claude
     # Code / Codex CLI) and resume the newly created Hermes session.
@@ -4661,6 +4757,7 @@ _LAZY_COMMAND_EXPORTS = {
         "_resume_windows_gateways_after_update",
         "_run_logged_subprocess",
         "_run_pre_update_backup",
+        "_service_unit_supports_graceful_sigusr1_restart",
         "_should_skip_upstream_prompt",
         "_stash_apply_failed_only_on_existing_untracked",
         "_stash_local_changes_if_needed",
@@ -5972,7 +6069,7 @@ def _run_npm_install_deterministic(
     # unicode-animations' postinstall animates to /dev/tty (bypasses
     # --silent/capture_output). It no-ops when CI is set — same as the TUI
     # install path and nix/lib.nix npm ci hooks.
-    run_env = {**os.environ, **(env or {}), "CI": "1"}
+    run_env = _npm_lifecycle_env(env)
 
     def _run(cmd: list[str]) -> subprocess.CompletedProcess:
         return _run_npm_watching_for_engine_failure(
@@ -6172,7 +6269,7 @@ def _do_build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
             _say("Web UI frontend not built and npm is not available.")
             _say("Install Node.js, then run:  cd web && npm install && npm run build")
         return not fatal
-    build_env = with_hermes_node_path()
+    build_env = _npm_lifecycle_env(with_hermes_node_path())
     _say("→ Building web UI...")
 
     def _relay(result: "subprocess.CompletedProcess") -> None:
@@ -7773,6 +7870,7 @@ def cmd_gui(args: argparse.Namespace):
             if _force_adhoc_macos_signing(env, source_mode=source_mode):
                 print("  → No Developer ID configured; ad-hoc signing this local rebuild "
                       "(CSC_IDENTITY_AUTO_DISCOVERY=false)")
+            npm_build_env = _npm_lifecycle_env(env)
             if not source_mode:
                 # A running desktop instance launched from release/win-unpacked
                 # holds Hermes.exe locked on Windows, so the pack can't replace
@@ -7782,7 +7880,9 @@ def cmd_gui(args: argparse.Namespace):
                 stopped = _stop_desktop_processes_locking_build(desktop_dir)
                 if stopped:
                     print(f"  ⚠ Stopped running desktop app to free the build output (pid {', '.join(map(str, stopped))})")
-            build_result = subprocess.run([npm, "run", build_script], cwd=desktop_dir, env=env, check=False)
+            build_result = subprocess.run(
+                [npm, "run", build_script], cwd=desktop_dir, env=npm_build_env, check=False
+            )
             if (
                 build_result.returncode != 0
                 and not source_mode
@@ -7809,7 +7909,9 @@ def cmd_gui(args: argparse.Namespace):
                     # The purge can't remove a win-unpacked tree whose Hermes.exe
                     # is still locked by a running instance; stop it before retry.
                     _stop_desktop_processes_locking_build(desktop_dir)
-                    build_result = subprocess.run([npm, "run", build_script], cwd=desktop_dir, env=env, check=False)
+                    build_result = subprocess.run(
+                        [npm, "run", build_script], cwd=desktop_dir, env=npm_build_env, check=False
+                    )
             if (
                 build_result.returncode != 0
                 and not source_mode
@@ -7820,7 +7922,7 @@ def cmd_gui(args: argparse.Namespace):
                       "GitHub looks blocked. Re-downloading via a public mirror "
                       "(npmmirror.com)... (set ELECTRON_MIRROR to use another mirror)")
                 mirror = _ELECTRON_FALLBACK_MIRROR
-                mirror_env = dict(env)
+                mirror_env = dict(npm_build_env)
                 mirror_env["ELECTRON_MIRROR"] = mirror
                 if not _electron_dist_ok(PROJECT_ROOT):
                     _redownload_electron_dist(PROJECT_ROOT, env, mirror=mirror)
@@ -12562,7 +12664,7 @@ def main():
     build_tools_parser(subparsers, cmd_tools=cmd_tools)
 
     # =========================================================================
-    # computer-use command — manage Computer Use (cua-driver) on macOS
+    # computer-use command — manage Computer Use (cua-driver)
     # =========================================================================
     computer_use_parser = subparsers.add_parser(
         "computer-use",
@@ -12665,47 +12767,20 @@ def main():
         "grant",
         help="Request the grants (opens the dialog attributed to CuaDriver)",
     )
-    computer_use_browser_approve = computer_use_sub.add_parser(
-        "browser-approve",
-        help="Mint a single-use token authorizing browser attachment for one exact window",
-        description=(
-            "Runs `cua-driver browser-approve` to mint a five-minute,\n"
-            "single-use token that authorizes ONE browser preparation for the\n"
-            "exact process (and window) you name. Give the printed token to\n"
-            "the agent; it passes it as approval_token on the\n"
-            "cua_browser_prepare action.\n\n"
-            "This is the explicit human boundary for attaching to a browser —\n"
-            "especially an existing signed-in profile, where the DevTools\n"
-            "protocol can see that profile's live pages, cookies, and storage.\n"
-            "Ordinary tool approval never substitutes for this grant, so a\n"
-            "model can never mint or guess the token itself.\n\n"
-            "Find the pid/window_id via the agent (list_windows) or ask it to\n"
-            "read them from a native capture."
-        ),
-    )
-    computer_use_browser_approve.add_argument(
-        "--pid", type=int, required=True,
-        help="Exact browser process id to authorize",
-    )
-    computer_use_browser_approve.add_argument(
-        "--window-id", type=int, default=None,
-        help="Exact native window id (required for existing-profile attachment)",
-    )
-    computer_use_browser_approve.add_argument(
-        "--profile-mode",
-        choices=["isolated_new", "isolated_named", "existing_profile"],
-        default="isolated_new",
-        help="Preparation the token authorizes (default: isolated_new)",
-    )
-
     def cmd_computer_use(args):
         action = getattr(args, "computer_use_action", None)
         if action == "install":
-            from hermes_cli.tools_config import install_cua_driver
-            install_cua_driver(upgrade=bool(getattr(args, "upgrade", False)))
-            return
+            from hermes_cli.tools_config import (
+                _cua_driver_contract_status,
+                install_cua_driver,
+            )
+            if not install_cua_driver(upgrade=bool(getattr(args, "upgrade", False))):
+                return 1
+            return 0 if _cua_driver_contract_status().get("ready") else 1
         if action == "status":
+            import os as _os
             import subprocess
+            from hermes_cli.tools_config import _cua_driver_contract_status
             from tools.computer_use.cua_backend import (
                 cua_driver_update_check,
                 resolve_cua_driver_cmd,
@@ -12713,6 +12788,7 @@ def main():
             # Must match the runtime resolver: Desktop/TUI processes can omit
             # ~/.local/bin even though the official installer put the driver there.
             path = resolve_cua_driver_cmd()
+            override = _os.environ.get("HERMES_CUA_DRIVER_CMD", "").strip()
             if path:
                 version = ""
                 try:
@@ -12724,10 +12800,31 @@ def main():
                     ).stdout.strip()
                 except Exception:
                     pass
+                from hermes_cli.tools_config import _cua_version_summary
+                version = _cua_version_summary(version)
+                # Name the override here too. Without it the operator is told
+                # to repair an install that `hermes computer-use install` will
+                # (correctly) refuse to touch, with nothing pointing at the
+                # env var that actually selected the binary.
+                origin = " [custom binary from HERMES_CUA_DRIVER_CMD]" if override else ""
                 if version:
-                    print(f"cua-driver: installed at {path} ({version})")
+                    print(f"cua-driver: installed at {path}{origin} ({version})")
                 else:
-                    print(f"cua-driver: installed at {path}")
+                    print(f"cua-driver: installed at {path}{origin}")
+                contract = _cua_driver_contract_status(path)
+                if not contract.get("ready"):
+                    print(
+                        "  ⚠ Repair required: "
+                        + (contract.get("reason") or "runtime contract is incomplete")
+                    )
+                    if override:
+                        print(
+                            "    Update the binary selected by HERMES_CUA_DRIVER_CMD, or unset "
+                            "the override and run: hermes computer-use install --upgrade"
+                        )
+                    else:
+                        print("    Run: hermes computer-use install")
+                    return 1
                 try:
                     st = cua_driver_update_check()
                     if st and st.get("update_available"):
@@ -12741,10 +12838,10 @@ def main():
                         print("  Refresh to latest: hermes computer-use install --upgrade")
                 except Exception:
                     print("  Refresh to latest: hermes computer-use install --upgrade")
-                return
+                return 0
             print("cua-driver: not installed")
             print("  Run: hermes computer-use install")
-            return
+            return 1
         if action == "doctor":
             from tools.computer_use.doctor import run_doctor
             code = run_doctor(
@@ -12753,36 +12850,6 @@ def main():
                 json_output=bool(getattr(args, "json", False)),
             )
             sys.exit(code)
-        if action == "browser-approve":
-            import subprocess
-            from tools.computer_use.cua_backend import (
-                cua_driver_child_env,
-                cua_driver_install_hint,
-                resolve_cua_driver_cmd,
-            )
-            binary = resolve_cua_driver_cmd()
-            if not binary:
-                print(cua_driver_install_hint())
-                sys.exit(2)
-            cmd = [binary, "browser-approve", "--pid", str(args.pid)]
-            window_id = getattr(args, "window_id", None)
-            if window_id is not None:
-                cmd += ["--window-id", str(window_id)]
-            cmd += ["--profile-mode", getattr(args, "profile_mode", "isolated_new")]
-            try:
-                # Interactive passthrough: cua-driver requires a TTY to mint
-                # the grant, prints the token itself, and owns the expiry.
-                proc = subprocess.run(cmd, env=cua_driver_child_env())
-            except OSError as exc:
-                print(f"cua-driver browser-approve failed to launch: {exc}", file=sys.stderr)
-                sys.exit(2)
-            if proc.returncode == 0:
-                print(
-                    "\nGive the token above to the agent — it passes it as "
-                    "approval_token on cua_browser_prepare. Single use, "
-                    "expires in ~5 minutes."
-                )
-            sys.exit(proc.returncode)
         if action == "permissions":
             perms_action = getattr(args, "computer_use_perms_action", None)
             if perms_action == "grant":
