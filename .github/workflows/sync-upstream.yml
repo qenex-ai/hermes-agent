@@ -85,6 +85,47 @@ jobs:
             echo "ALREADY_IN_SYNC=1" >> "$GITHUB_ENV"
           fi
 
+      - name: Verify the previous sync actually landed in history
+        run: |
+          set -euo pipefail
+          # A human merging a sync PR with "Squash and merge" applies the CONTENT
+          # but produces a SINGLE-PARENT commit, so the upstream commits never
+          # enter main's ancestry. Nothing downstream notices: files are right,
+          # tests pass, the PR closes green. The cost appears later - GitHub keeps
+          # reporting the fork as N behind, warns of conflicts on commits already
+          # applied, offers a "Discard N commits" button that would strip this
+          # fork's hardening, and this workflow re-merges the same commits and
+          # replays the same conflict daily. PR #115 on 2026-08-17 did exactly
+          # that and needed a manual `git merge -s ours` (PR #116) to unstick.
+          #
+          # The check is against a RECORDED SHA rather than an inferred one.
+          # Two inference-based designs were tried and both failed on this repo's
+          # real history:
+          #   * "we are behind but merging changes no file" - upstream keeps
+          #     advancing, so within hours a squash has real content to merge and
+          #     the test goes quiet exactly when it is needed. Verified silent at
+          #     the squashed commit 65acf9f48.
+          #   * "parent count of the last merged sync PR" - fires forever after a
+          #     squash even once repaired by a later PR, because it reads history
+          #     rather than current state. It also depends on the head branch
+          #     surviving, and GitHub auto-deletes it on merge.
+          if [ ! -f .github/last-synced-upstream ]; then
+            echo "no recorded sync point yet - this run will create one"
+            exit 0
+          fi
+          RECORDED=$(tr -d '[:space:]' < .github/last-synced-upstream)
+          if ! git cat-file -e "${RECORDED}^{commit}" 2>/dev/null; then
+            echo "::warning::recorded sync point $RECORDED is not a known commit; skipping"
+            exit 0
+          fi
+          if git merge-base --is-ancestor "$RECORDED" HEAD; then
+            echo "previous sync point $RECORDED is in main's ancestry - intact"
+            exit 0
+          fi
+          echo "::error::The previous sync was SQUASHED. Upstream commit $RECORDED was merged into main - its content is present, since this very file arrived with it - but it is NOT in main's ancestry, so git still considers those commits unmerged."
+          echo "::error::Remedy: git checkout main && git merge -s ours $RECORDED, push via PR, and merge THAT with a merge commit. It records the ancestry without touching a single file. Safe only because the content is already present - verify with git diff before doing it."
+          exit 1
+
       - name: Merge upstream into a sync branch
         if: env.ALREADY_IN_SYNC != '1'
         id: merge
@@ -101,6 +142,21 @@ jobs:
             exit 0
           fi
           git push --force-with-lease origin sync/upstream
+
+      - name: Record the upstream commit this sync merges
+        if: env.ALREADY_IN_SYNC != '1' && env.CONFLICTED != '1'
+        run: |
+          set -euo pipefail
+          # Written on the sync branch so it travels with the merge. If the PR is
+          # later squashed, this file still lands on main carrying the SHA - which
+          # is precisely what lets the next run prove the ancestry is missing
+          # while the content is present. Recording beats inferring: both
+          # inference designs tried here went quiet in the case that mattered.
+          git rev-parse upstream/main > .github/last-synced-upstream
+          git add .github/last-synced-upstream
+          if ! git diff --cached --quiet; then
+            git commit -q -m "chore(sync): record upstream $(git rev-parse --short upstream/main) as the sync point"
+          fi
 
       - name: Verify the fork's own files survived
         if: env.ALREADY_IN_SYNC != '1' && env.CONFLICTED != '1'
