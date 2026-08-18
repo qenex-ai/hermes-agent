@@ -19,6 +19,31 @@ from agent.transports.base import ProviderTransport
 from agent.transports.types import NormalizedResponse, ToolCall, Usage
 
 
+# Hermes' reasoning vocabulary is WIDER than the wire APIs it talks to.
+# batch_runner accepts "ultra"; OpenRouter rejects the entire request with
+# HTTP 400 "reasoning.effort: Invalid option: expected one of
+# max|xhigh|high|medium|low|minimal|none". Measured 2026-08-18: two cron jobs
+# failed this way with NO inference call made, and the drift guard reported it
+# as a config-drift skip, which sent the reader after the provider/model pin
+# rather than the payload.
+#
+# plugins/model-providers/opencode-zen already clamps for exactly this reason;
+# the generic OpenAI-compatible paths had no equivalent.
+_WIRE_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+
+def _clamp_effort(effort):
+    """Map a Hermes effort level onto one the wire API accepts.
+
+    Anything above the wire ceiling becomes "max", not "medium": the caller
+    asked for the most thinking available, and quietly halving it would answer
+    a different question than the one they asked.
+    """
+    e = str(effort or "medium").strip().lower()
+    return e if e in _WIRE_EFFORTS else "max"
+
+
+
 def _static_prompt_instructions(messages: list[dict[str, Any]]) -> str:
     """Return the stable system/developer prefix used for cache routing.
 
@@ -640,7 +665,7 @@ class ChatCompletionsTransport(ProviderTransport):
             else:
                 _effort = "medium"
                 if reasoning_config and isinstance(reasoning_config, dict):
-                    _effort = reasoning_config.get("effort", "medium") or "medium"
+                    _effort = _clamp_effort(reasoning_config.get("effort", "medium"))
                 extra_body["reasoning"] = {"enabled": True, "effort": _effort}
 
         if provider_name == "gemini":

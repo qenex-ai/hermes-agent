@@ -166,6 +166,31 @@ from hermes_cli.config import get_hermes_home
 from hermes_constants import OPENROUTER_BASE_URL
 from utils import base_url_host_matches, base_url_hostname, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
+
+# Hermes' reasoning vocabulary is WIDER than the wire APIs it talks to.
+# batch_runner accepts "ultra"; OpenRouter rejects the entire request with
+# HTTP 400 "reasoning.effort: Invalid option: expected one of
+# max|xhigh|high|medium|low|minimal|none". Measured 2026-08-18: two cron jobs
+# failed this way with NO inference call made, and the drift guard reported it
+# as a config-drift skip, which sent the reader after the provider/model pin
+# rather than the payload.
+#
+# plugins/model-providers/opencode-zen already clamps for exactly this reason;
+# the generic OpenAI-compatible paths had no equivalent.
+_WIRE_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+
+def _clamp_effort(effort):
+    """Map a Hermes effort level onto one the wire API accepts.
+
+    Anything above the wire ceiling becomes "max", not "medium": the caller
+    asked for the most thinking available, and quietly halving it would answer
+    a different question than the one they asked.
+    """
+    e = str(effort or "medium").strip().lower()
+    return e if e in _WIRE_EFFORTS else "max"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -8540,7 +8565,7 @@ def _build_call_kwargs(
         if reasoning_config.get("enabled") is False:
             merged_extra["reasoning"] = {"enabled": False}
         else:
-            effort = reasoning_config.get("effort") or "medium"
+            effort = _clamp_effort(reasoning_config.get("effort"))
             merged_extra["reasoning"] = {"enabled": True, "effort": effort}
     # Portal product tags + sticky session_id. The provider profile usually
     # supplies both; this fallback covers profile-load failures and alias
