@@ -65,3 +65,24 @@ def test_optional_extras_fallback_skipped_when_pypi_times_out(monkeypatch):
 
     assert len(calls) == 1
     assert calls[0][-2:] == ["-e", ".[all]"]
+
+
+def test_early_recovery_skips_uv_when_index_unreachable(tmp_path, monkeypatch, capsys):
+    """Invariant: a down package index must not spend ~45s in uv on every launch."""
+    from hermes_cli import _early_recovery as er
+    from hermes_cli import _install_repair as ir
+
+    marker = tmp_path / ".update-incomplete"
+    marker.write_text('{"attempts": 0}\n', encoding="utf-8")
+    ran = []
+    monkeypatch.setattr(ir, "_probe_index_unreachable", lambda timeout=3.0: True)
+    monkeypatch.setattr(ir, "run_core_install", lambda root: ran.append(root))
+    monkeypatch.setattr(er, "_claim_recovery_lock", lambda root: True)
+    monkeypatch.setattr(er, "_release_recovery_lock", lambda root: None)
+    monkeypatch.setattr(er, "_read_marker_attempts", lambda path: 0)
+
+    assert er._complete_pending_core_install(tmp_path, marker) is False
+    assert ran == []
+    assert marker.exists()
+    err = capsys.readouterr().err
+    assert "Package index unreachable" in err

@@ -95,8 +95,8 @@ from hermes_cli.update_cmd_git import (  # noqa: F401
     _has_upstream_remote, _is_fork, _locate_real_git, _mark_skip_upstream_prompt,
     _normalize_managed_eol, _portable_git_candidates, _print_fetch_failure,
     _print_parked_branch_kept_notice, _print_parked_branch_skip_warning,
-    _prune_orphan_rescue_refs, _should_skip_upstream_prompt, _sync_fork_with_upstream,
-    _sync_with_upstream_if_needed)
+    _prune_orphan_rescue_refs, _should_skip_upstream_prompt, _stderr_is_missing_origin,
+    _sync_fork_with_upstream, _sync_with_upstream_if_needed)
 from hermes_cli.update_cmd_maint import (  # noqa: F401
     _PRE_UPDATE_SNAPSHOT_KEEP, _PRE_UPDATE_SNAPSHOT_MAX_FILE_SIZE, _STALE_PURGE_PREFIXES,
     _STALE_PURGE_PROTECTED, _UPDATE_RUNTIME_RELOAD_MODULES, _clear_stale_sqlite_sidecars,
@@ -485,6 +485,10 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
         _m()._ensure_origin_remote(git_cmd, _m().PROJECT_ROOT)
         print("→ Fetching from origin...")
         fetch_result = _git_run(git_cmd, ["fetch"] + depth_args + ["origin", branch], network=True)
+        if fetch_result.returncode != 0 and _stderr_is_missing_origin(fetch_result.stderr or ""):
+            print("→ Origin remote unusable — restoring and retrying fetch...")
+            _m()._ensure_origin_remote(git_cmd, _m().PROJECT_ROOT, force=True)
+            fetch_result = _git_run(git_cmd, ["fetch"] + depth_args + ["origin", branch], network=True)
         compare_branch = f"origin/{branch}"
 
     if fetch_result.returncode != 0:
@@ -1297,6 +1301,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
         print("→ Fetching updates...")
         fetch_result = _git_run(git_cmd, ["fetch", "origin", branch], network=True)
+        if fetch_result.returncode != 0 and _stderr_is_missing_origin(fetch_result.stderr or ""):
+            print("→ Origin remote unusable — restoring and retrying fetch...")
+            _m()._ensure_origin_remote(git_cmd, _m().PROJECT_ROOT, force=True)
+            fetch_result = _git_run(git_cmd, ["fetch", "origin", branch], network=True)
         if fetch_result.returncode != 0:
             _print_fetch_failure(fetch_result.stderr)
             sys.exit(1)
