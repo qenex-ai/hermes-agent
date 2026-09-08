@@ -21,10 +21,13 @@ if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 
-# `uv sync --locked` creates `.venv` itself. Prefer the already-provisioned
-# 3.11 interpreter (CI's version) so we do not pull 3.14 via UV_PYTHON.
-echo "→ uv sync --locked (all, dev, and test-required lazy extras)"
-uv sync --locked --python 3.11 \
+# `uv sync --frozen` installs uv.lock as-is without rewriting it. `--locked`
+# fails here when pyproject exclude-newer exceptions (e.g. `h2`) have expired
+# relative to the lockfile; environment bootstrap must not run `uv lock`.
+# Prefer the already-provisioned 3.11 interpreter (CI's version) so we do not
+# pull 3.14 via UV_PYTHON.
+echo "→ uv sync --frozen (all, dev, and test-required lazy extras)"
+uv sync --frozen --python 3.11 \
   --extra all --extra dev \
   --extra anthropic --extra mistral --extra fal \
   --extra modal --extra daytona --extra hindsight --extra parallel-web
