@@ -89,8 +89,9 @@ from hermes_cli.update_cmd_deps import (  # noqa: F401
 from hermes_cli.update_cmd_git import (  # noqa: F401
     OFFICIAL_REPO_URL, OFFICIAL_REPO_URLS, SKIP_UPSTREAM_PROMPT_FILE, _ORPHAN_RESCUE_REFS_TO_KEEP,
     _ORPHAN_RESCUE_REF_MAX_AGE_DAYS, _add_upstream_remote, _assess_parked_branch_switch,
-    _branch_head_label, _branch_head_suffix, _classify_fetch_failure, _count_commits_between,
-    _discard_lockfile_churn, _ensure_non_trampoline_git, _get_origin_url, _git_is_trampoline,
+    _branch_head_label, _branch_head_suffix, _candidate_origin_from_remotes, _classify_fetch_failure,
+    _count_commits_between, _discard_lockfile_churn, _ensure_non_trampoline_git, _ensure_origin_remote,
+    _get_origin_url, _git_is_trampoline,
     _has_upstream_remote, _is_fork, _locate_real_git, _mark_skip_upstream_prompt,
     _normalize_managed_eol, _portable_git_candidates, _print_fetch_failure,
     _print_parked_branch_kept_notice, _print_parked_branch_skip_warning,
@@ -481,6 +482,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
     if fetch_result is not None and fetch_result.returncode == 0:
         compare_branch = f"upstream/{branch}"
     else:
+        _m()._ensure_origin_remote(git_cmd, _m().PROJECT_ROOT)
         print("→ Fetching from origin...")
         fetch_result = _git_run(git_cmd, ["fetch"] + depth_args + ["origin", branch], network=True)
         compare_branch = f"origin/{branch}"
@@ -1025,7 +1027,7 @@ def _prepare_git_command() -> tuple[bool, list, bool]:
     _discard_lockfile_churn(git_cmd, _m().PROJECT_ROOT)
     _normalize_managed_eol(git_cmd, _m().PROJECT_ROOT)
 
-    origin_url = _m()._get_origin_url(git_cmd, _m().PROJECT_ROOT)
+    origin_url = _m()._ensure_origin_remote(git_cmd, _m().PROJECT_ROOT)
     is_fork = _is_fork(origin_url)
 
     if is_fork:

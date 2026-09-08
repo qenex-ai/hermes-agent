@@ -35,6 +35,98 @@ from pathlib import Path
 from hermes_cli import _early_recovery as _er
 
 
+_INDEX_UNREACHABLE_NOTICE = (
+    "  ⚠ Package index unreachable — not retrying extras individually.\n"
+    "  The current venv is unchanged. Re-run `hermes update` when the network is available."
+)
+
+
+def _called_process_output(exc: BaseException | None) -> str:
+    """Combined stdout/stderr from a ``CalledProcessError`` (empty when the child inherited fds)."""
+    if not isinstance(exc, subprocess.CalledProcessError):
+        return ""
+    parts = []
+    for blob in (exc.stderr, exc.stdout, getattr(exc, "output", None)):
+        if not blob:
+            continue
+        parts.append(blob.decode("utf-8", "replace") if isinstance(blob, bytes) else str(blob))
+    return "\n".join(parts)
+
+
+def _output_is_index_unreachable(text: str) -> bool:
+    """True when uv/pip output shows the package index (PyPI or ``/simple/``) could not be reached."""
+    s = (text or "").lower()
+    if not s:
+        return False
+    index_hit = (
+        "pypi.org" in s
+        or "pypi.python.org" in s
+        or "files.pythonhosted.org" in s
+        or "/simple/" in s
+    )
+    if not index_hit:
+        return False
+    return any(
+        token in s
+        for token in (
+            "failed to fetch",
+            "operation timed out",
+            "connection timed out",
+            "timed out",
+            "network is unreachable",
+            "connection refused",
+            "client error (connect)",
+            "could not connect",
+            "temporary failure in name resolution",
+            "nodename nor servname",
+            "failed to resolve",
+            "name or service not known",
+        )
+    )
+
+
+def _index_probe_url() -> str:
+    """Probe URL: custom uv/pip index if set, else PyPI's pip simple page."""
+    for key in ("UV_INDEX_URL", "PIP_INDEX_URL", "PIP_INDEX"):
+        url = os.environ.get(key, "").strip()
+        if url:
+            return url.rstrip("/") + "/"
+    return "https://pypi.org/simple/pip/"
+
+
+def _probe_index_unreachable(timeout: float = 3.0) -> bool:
+    """True when a short HTTP probe cannot connect to the package index.
+
+    An HTTP error (4xx/5xx) still counts as reachable — we got a TCP/TLS response.
+    """
+    url = _index_probe_url()
+    try:
+        import urllib.error
+        import urllib.request
+
+        urllib.request.urlopen(url, timeout=timeout)
+        return False
+    except urllib.error.HTTPError:
+        return False
+    except Exception:
+        return True
+
+
+def install_failure_is_index_unreachable(exc: BaseException | None = None) -> bool:
+    """True when a uv/pip install failed because the package index is unreachable.
+
+    Prefers captured installer output. When the child inherited fds (no captured
+    text), probes the index with a short timeout so the extras-fallback ladder
+    does not spend another ~45s on the same dead index.
+    """
+    blob = _called_process_output(exc)
+    if _output_is_index_unreachable(blob):
+        return True
+    if blob.strip():
+        return False
+    return _probe_index_unreachable()
+
+
 def _is_windows() -> bool:
     return sys.platform == "win32"
 
@@ -658,7 +750,10 @@ def run_core_install(root: Path) -> None:
                 prefix + ["install", "-e", f".[{group}]"], env=env, root=root
             )
             return
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
+            if install_failure_is_index_unreachable(exc):
+                print(_INDEX_UNREACHABLE_NOTICE)
+                raise
             print(
                 "  ⚠ Optional extras failed, reinstalling base dependencies "
                 "and retrying extras individually..."
