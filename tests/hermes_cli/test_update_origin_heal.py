@@ -194,3 +194,26 @@ def test_fetch_by_url_creates_origin_ref_when_remote_is_gone(tmp_path, monkeypat
     assert result.returncode == 0
     assert _git(dest, "rev-parse", "--verify", f"origin/{branch}")
     assert _git(dest, "config", "--get", "remote.origin.url") == str(src)
+
+
+def test_early_recovery_heals_origin_without_an_install_marker(tmp_path, capsys):
+    """Invariant: a normal `hermes` launch restores origin even with no update marker."""
+    from hermes_cli import _early_recovery as er
+
+    repo = _init_repo(tmp_path)
+    er.recover_if_needed(project_root=repo, argv=[])
+    assert _git(repo, "config", "--get", "remote.origin.url") == OFFICIAL
+    err = capsys.readouterr().err
+    assert "Restored git remote 'origin'" in err
+
+
+def test_early_recovery_remembers_existing_origin(tmp_path):
+    from hermes_cli import _early_recovery as er
+    from hermes_constants import get_hermes_home
+
+    repo = _init_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", FORK)
+    er.recover_if_needed(project_root=repo, argv=[])
+    cache = Path(get_hermes_home()) / ".update_origin_url"
+    assert cache.read_text(encoding="utf-8").strip() == FORK
+    assert _git(repo, "config", "--get", "remote.origin.url") == FORK
