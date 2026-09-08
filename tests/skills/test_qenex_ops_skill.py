@@ -176,6 +176,30 @@ def test_ledger_invariants_override_file(hermes_env):
     assert restored["product"] == "lab"
 
 
+def test_tick_ingests_eml_mailbox(hermes_env):
+    mod = load_module()
+    home = hermes_env
+    mod.setup(home=home, create_cron=False)
+    mailbox = home / "qenex-ops" / "mailbox"
+    mailbox.mkdir(parents=True, exist_ok=True)
+    (mailbox / "uni.eml").write_text(
+        "From: pi@example.ac.uk\n"
+        "Subject: Academic license\n"
+        "MIME-Version: 1.0\n"
+        "Content-Type: text/plain; charset=utf-8\n"
+        "\n"
+        "Our chemistry group wants a quantum chemistry academic license.\n",
+        encoding="utf-8",
+    )
+    summary = mod.tick(home=home)
+    assert summary["ingested_eml"] == 1
+    assert summary["actionable"] == 1
+    draft = json.loads((home / "qenex-ops" / "drafts" / "eml-uni.json").read_text(encoding="utf-8"))
+    assert draft["ops"]["kind"] == "lab_license"
+    assert draft["ops"]["send"] is False
+    assert not (mailbox / "uni.eml").exists()
+
+
 def test_empty_tick_is_silent(hermes_env, capsys):
     mod = load_module()
     home = hermes_env

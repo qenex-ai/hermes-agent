@@ -247,6 +247,7 @@ def _ensure_dirs(home: Path) -> dict[str, Path]:
         "refused": root / "refused",
         "processed": root / "processed",
         "noise": root / "noise",
+        "mailbox": root / "mailbox",
     }
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
@@ -291,6 +292,65 @@ def _install_cron_script(home: Path) -> Path:
     return dest
 
 
+def _gateway_hint() -> dict[str, Any]:
+    """Builtin cron only fires inside a live gateway. None = probe failed."""
+    try:
+        from hermes_cli.cron import _builtin_gateway_liveness
+
+        live = _builtin_gateway_liveness()
+    except Exception:
+        live = None
+    return {
+        "running": live,
+        "ticker": "gateway",
+        "start": "hermes gateway install",
+    }
+
+
+def ingest_mailbox(*, home: Optional[Path] = None) -> list[Path]:
+    """Turn dropped ``mailbox/*.eml`` files into inbox JSON. No send."""
+    from email import policy
+    from email.parser import BytesParser
+
+    home = resolve_home(home)
+    paths = _ensure_dirs(home)
+    written: list[Path] = []
+    for eml in sorted(paths["mailbox"].glob("*.eml")):
+        item_id = f"eml-{eml.stem}"
+        dest = paths["inbox"] / f"{item_id}.json"
+        if dest.is_file():
+            eml.replace(paths["processed"] / eml.name)
+            continue
+        msg = BytesParser(policy=policy.default).parsebytes(eml.read_bytes())
+        body = _eml_plain_body(msg)
+        enqueue(
+            home=home,
+            sender=str(msg.get("from") or ""),
+            subject=str(msg.get("subject") or ""),
+            body=body,
+            source="mailbox",
+            item_id=item_id,
+        )
+        eml.replace(paths["processed"] / eml.name)
+        written.append(dest)
+    return written
+
+
+def _eml_plain_body(msg: Any) -> str:
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                try:
+                    return str(part.get_content())
+                except Exception:
+                    continue
+        return ""
+    try:
+        return str(msg.get_content())
+    except Exception:
+        return str(msg.get_payload() or "")
+
+
 def _create_cron_job(schedule: str) -> dict[str, Any]:
     from cron.jobs import create_job, list_jobs
 
@@ -330,6 +390,7 @@ def setup(
         "skill": str(skill_dest),
         "script": str(script_dest),
         "cron": cron_info,
+        "gateway": _gateway_hint(),
         "invariants": {
             "auto_send": AUTO_SEND,
             "spend_allowed": SPEND_ALLOWED,
@@ -340,6 +401,7 @@ def setup(
             "UK director duties, filings, and contracts stay human.",
             "No outbound mail or payment is sent.",
             "LLM cost is zero on the tick; hosting and Lab compute are not free.",
+            "Jobs fire only while the Hermes gateway (cron ticker) is running.",
         ],
     }
     _write_json(paths["root"] / "setup-receipt.json", receipt)
@@ -428,6 +490,7 @@ def tick(*, home: Optional[Path] = None) -> dict[str, Any]:
     _write_json(_ledger_path(home), ledger)
     assert ledger["auto_send"] is False
     assert ledger["spend_allowed"] is False
+    ingested = ingest_mailbox(home=home)
     seen_path = state_dir(home) / "seen.json"
     seen = set(_load_json(seen_path, []))
     results: list[dict[str, Any]] = []
@@ -468,6 +531,7 @@ def tick(*, home: Optional[Path] = None) -> dict[str, Any]:
         "ok": True,
         "ticks": _now_iso(),
         "scanned": len(inbox_files),
+        "ingested_eml": len(ingested),
         "actionable": len(actionable),
         "auto_send": False,
         "spend_allowed": False,

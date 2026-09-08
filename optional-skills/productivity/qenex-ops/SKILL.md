@@ -41,35 +41,33 @@ Don't use for: paying invoices, filing Companies House, signing licenses, sendin
 Setup (foreground, once) via `terminal`:
 
 ```
-python optional-skills/productivity/qenex-ops/scripts/qenex_ops.py setup
+hermes qenex setup
 ```
 
-Or after install: `python $HERMES_HOME/scripts/qenex_ops.py setup`.
-
-That copies the script into `$HERMES_HOME/scripts/qenex_ops.py` (the only path cron will execute), copies this skill into `$HERMES_HOME/skills/qenex-ops/`, and creates a `no_agent` cron job. Empty ticks print nothing (`[SILENT]`).
+That copies the script into `$HERMES_HOME/scripts/qenex_ops.py` (the only path cron will execute), copies this skill into `$HERMES_HOME/skills/qenex-ops/`, and creates a `no_agent` cron job. The builtin ticker lives in the gateway — start it with `hermes gateway install` or the jobs never fire. Empty ticks print nothing (`[SILENT]`).
 
 Tick (each scheduled run) is the cron script itself. Do not schedule an agent job for this loop — that burns tokens. Foreground tick:
 
 ```
-python $HERMES_HOME/scripts/qenex_ops.py tick
+hermes qenex tick
 ```
 
-Enqueue a test lead, then `status`:
+Drop raw mail into `$HERMES_HOME/qenex-ops/mailbox/*.eml` (the tick turns them into inbox JSON) or enqueue a test lead, then `status`:
 
 ```
-python $HERMES_HOME/scripts/qenex_ops.py enqueue --from "pi@example.ac.uk" --subject "Lab license" --body "We want a quantum chemistry academic license for our group."
-python $HERMES_HOME/scripts/qenex_ops.py tick
-python $HERMES_HOME/scripts/qenex_ops.py status
+hermes qenex enqueue --from "pi@example.ac.uk" --subject "Lab license" --body "We want a quantum chemistry academic license for our group."
+hermes qenex tick
+hermes qenex status
 ```
 
 ## Quick Reference
 
 | Command | What it does |
 |---|---|
-| `setup` / `init` | State dirs, skill copy, `no_agent` cron job |
-| `tick` | Classify inbox; draft or refuse; silent if empty |
-| `enqueue` / `add` | Drop one JSON item into the inbox |
-| `status` / `st` | Queue counts + last tick |
+| `hermes qenex setup` / `init` | State dirs, skill copy, `no_agent` cron job |
+| `hermes qenex tick` | Ingest `.eml`, classify inbox; silent if empty |
+| `hermes qenex enqueue` / `add` | Drop one JSON item into the inbox |
+| `hermes qenex status` / `st` | Queue counts + last tick |
 
 Invariants (not config): `auto_send=false`, `spend_allowed=false`, product=`lab`.
 
@@ -81,7 +79,7 @@ QENEX LTD sells QENEX Lab only. Pulse is archived. Director duties, payments, pa
 
 ### 2. Install state and the cron script
 
-Run `qenex_ops.py setup` via `terminal`. Confirm `$HERMES_HOME/scripts/qenex_ops.py` exists (cron refuses paths outside `scripts/`). Done when `setup-receipt.json` lists `cron.no_agent=true` (or `--no-cron` was explicit).
+Run `hermes qenex setup` via `terminal`. Confirm `$HERMES_HOME/scripts/qenex_ops.py` exists (cron refuses paths outside `scripts/`). Done when `setup-receipt.json` lists `cron.no_agent=true` (or `--no-cron` was explicit).
 
 ### 3. Prove one foreground tick
 
@@ -101,7 +99,7 @@ Skip this `cronjob` call if setup already created `qenex-ops-tick`. Done when `h
 
 ### 4. Collect the inbox
 
-Read `$HERMES_HOME/qenex-ops/inbox/*.json`. Items already in `seen.json` move to `processed/` without re-drafting. Connector fetch is out of scope for the tick (keep the tick zero-token). Done when every file is classified or skipped as seen.
+Read `$HERMES_HOME/qenex-ops/inbox/*.json` after ingesting `$HERMES_HOME/qenex-ops/mailbox/*.eml`. Items already in `seen.json` move to `processed/` without re-drafting. Connector fetch is out of scope for the tick (keep the tick zero-token). Done when every file is classified or skipped as seen.
 
 ### 5. Classify with the profit ranking
 
