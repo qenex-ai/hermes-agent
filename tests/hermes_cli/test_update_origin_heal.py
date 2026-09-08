@@ -64,6 +64,17 @@ class TestCandidateOriginFromRemotes:
     def test_does_not_invent_a_url_when_no_remotes_remain(self):
         assert update_cmd._candidate_origin_from_remotes([]) is None
 
+    def test_config_regexp_lines_keep_stored_urls(self):
+        from hermes_cli.update_cmd_git import _parse_remote_config_urls
+        pairs = _parse_remote_config_urls(
+            "remote.upstream.url https://github.com/NousResearch/hermes-agent.git\n"
+            "remote.fork.url https://github.com/example/hermes-agent.git\n"
+        )
+        assert pairs == [
+            ("upstream", OFFICIAL),
+            ("fork", FORK),
+        ]
+
 
 def test_ensure_origin_remote_restores_from_upstream(tmp_path, capsys):
     """Invariant: a repo with only ``upstream`` gets ``origin`` pointing at that same URL."""
@@ -72,8 +83,10 @@ def test_ensure_origin_remote_restores_from_upstream(tmp_path, capsys):
     assert _git(repo, "remote") == "upstream"
 
     url = update_cmd._ensure_origin_remote(["git"], repo)
+    stored = _git(repo, "config", "--get", "remote.origin.url")
+    assert stored == OFFICIAL
     assert url == OFFICIAL
-    assert _git(repo, "remote", "get-url", "origin") == OFFICIAL
+    assert "origin" in _git(repo, "remote").split()
     out = capsys.readouterr().out
     assert "restored from 'upstream'" in out
     assert OFFICIAL in out

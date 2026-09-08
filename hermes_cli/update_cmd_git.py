@@ -183,19 +183,24 @@ def _get_origin_url(git_cmd: list[str], cwd: Path) -> Optional[str]:
     return _git_stdout(git_cmd, ["remote", "get-url", "origin"], cwd) or None
 
 
-def _parse_remote_v_lines(text: str) -> list[tuple[str, str]]:
-    """Parse ``git remote -v`` into unique ``(name, url)`` pairs (fetch URL first)."""
+def _parse_remote_config_urls(text: str) -> list[tuple[str, str]]:
+    """Parse ``git config --get-regexp '^remote\\..*\\.url$'`` into ``(name, url)`` pairs.
+
+    ``git remote -v`` / ``git remote get-url`` apply ``url.*.insteadOf`` rewrites, which
+    can inject a credential helper's HTTPS token into the displayed URL. Config keys
+    are the stored values — the only thing safe to copy onto ``origin``.
+    """
     pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
     for line in (text or "").splitlines():
-        parts = line.split()
-        if len(parts) < 2:
+        parts = line.split(None, 1)
+        if len(parts) != 2:
             continue
-        name, url = parts[0], parts[1]
-        if not url or (name, url) in seen:
+        key, url = parts[0], parts[1].strip()
+        if not url or not key.startswith("remote.") or not key.endswith(".url"):
             continue
-        seen.add((name, url))
-        pairs.append((name, url))
+        name = key[len("remote."):-len(".url")]
+        if name:
+            pairs.append((name, url))
     return pairs
 
 
@@ -251,7 +256,9 @@ def _ensure_origin_remote(git_cmd: list[str], cwd: Path) -> Optional[str]:
         return existing
     listed = _git_stdout(git_cmd, ["remote"], cwd) or ""
     names = {line.strip() for line in listed.splitlines() if line.strip()}
-    pairs = _parse_remote_v_lines(_git_stdout(git_cmd, ["remote", "-v"], cwd) or "")
+    pairs = _parse_remote_config_urls(
+        _git_stdout(git_cmd, ["config", "--get-regexp", r"^remote\..*\.url$"], cwd) or ""
+    )
     picked = _candidate_origin_from_remotes(pairs)
     if picked is None:
         return None
@@ -262,7 +269,7 @@ def _ensure_origin_remote(git_cmd: list[str], cwd: Path) -> Optional[str]:
     else:
         ok = _git_ok(git_cmd, ["remote", "add", "origin", url], cwd)
         action = "restored"
-    restored = _git_stdout(git_cmd, ["remote", "get-url", "origin"], cwd)
+    restored = _git_stdout(git_cmd, ["config", "--get", "remote.origin.url"], cwd)
     if not ok or not restored:
         return None
     print(f"  ⚠ No usable 'origin' remote — {action} from '{source_name}':")
