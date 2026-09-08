@@ -178,6 +178,10 @@ source .venv/bin/activate   # or: source venv/bin/activate
 `scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
 (worktrees sharing the main checkout's venv).
 
+Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --locked`
+into `.venv`). Do not put a foreground server in that script; per-boot services belong
+in the environment `start` command or `terminals`.
+
 ## Project Structure
 
 Counts shift constantly; the filesystem is canonical. Load-bearing entry points:
