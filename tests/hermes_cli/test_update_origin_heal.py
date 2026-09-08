@@ -1,10 +1,10 @@
-"""Restore a missing ``origin`` remote from a sibling remote before ``hermes update`` fetches.
+"""Restore a missing ``origin`` remote before ``hermes update`` fetches.
 
 Production (Sep 2026): ``git fetch origin`` died with
-``fatal: 'origin' does not appear to be a git repository`` on checkouts that
-still had ``upstream`` (or a fork remote) after origin was deleted. The updater
-must copy an already-configured URL onto ``origin`` — never invent Nous or a
-fork host — and prefer a hermes-agent fork over official ``upstream``.
+``fatal: 'origin' does not appear to be a git repository``. Recovery order:
+sibling remotes (fork over official ``upstream``) → last URL this install used
+→ official Nous, and only when no sibling remotes remain. The picker itself
+never invents a URL. Fork hosts are never hardcoded.
 """
 
 from __future__ import annotations
@@ -90,3 +90,67 @@ def test_ensure_origin_remote_restores_from_upstream(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "restored from 'upstream'" in out
     assert OFFICIAL in out
+
+
+def test_unusable_origin_url_is_replaced_from_upstream(tmp_path, capsys):
+    """A leftover origin URL that is not a git repo must not skip restore."""
+    repo = _init_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", "not-a-git-repo")
+    _git(repo, "remote", "add", "upstream", OFFICIAL)
+    url = update_cmd._ensure_origin_remote(["git"], repo)
+    assert url == OFFICIAL
+    assert _git(repo, "config", "--get", "remote.origin.url") == OFFICIAL
+    assert "reset from 'upstream'" in capsys.readouterr().out
+
+
+def test_zero_remotes_recalls_last_known(tmp_path, capsys):
+    """Invariant: a wiped-remotes checkout recovers the last origin this install used."""
+    from hermes_constants import get_hermes_home
+
+    repo = _init_repo(tmp_path)
+    cache = Path(get_hermes_home()) / ".update_origin_url"
+    cache.write_text(FORK + "\n", encoding="utf-8")
+    url = update_cmd._ensure_origin_remote(["git"], repo)
+    assert url == FORK
+    assert _git(repo, "config", "--get", "remote.origin.url") == FORK
+    assert "last successful update" in capsys.readouterr().out
+
+
+def test_successful_restore_writes_last_known(tmp_path):
+    """Next wipe can only recall a URL this install previously restored."""
+    from hermes_constants import get_hermes_home
+
+    repo = _init_repo(tmp_path)
+    _git(repo, "remote", "add", "upstream", OFFICIAL)
+    update_cmd._ensure_origin_remote(["git"], repo)
+    cache = Path(get_hermes_home()) / ".update_origin_url"
+    assert cache.read_text(encoding="utf-8").strip() == OFFICIAL
+
+
+def test_zero_remotes_last_resort_official(tmp_path, capsys):
+    """A checkout with no remotes and no cache still gets a fetchable origin."""
+    repo = _init_repo(tmp_path)
+    url = update_cmd._ensure_origin_remote(["git"], repo)
+    assert url == OFFICIAL
+    assert _git(repo, "config", "--get", "remote.origin.url") == OFFICIAL
+    out = capsys.readouterr().out
+    assert "official Hermes repository" in out
+    assert "point origin back at it" in out
+
+
+def test_ambiguous_non_hermes_remotes_do_not_invent_official(tmp_path):
+    """Invariant: leftover non-hermes remotes are not replaced with Nous."""
+    repo = _init_repo(tmp_path)
+    _git(repo, "remote", "add", "heroku", "https://git.heroku.com/app.git")
+    _git(repo, "remote", "add", "gitlab", "https://gitlab.com/org/other.git")
+    assert update_cmd._ensure_origin_remote(["git"], repo) is None
+    assert "origin" not in _git(repo, "remote").split()
+
+
+def test_origin_url_looks_fetchable_rejects_garbage():
+    from hermes_cli.update_cmd_git import _origin_url_looks_fetchable
+
+    assert _origin_url_looks_fetchable(OFFICIAL)
+    assert _origin_url_looks_fetchable("git@github.com:NousResearch/hermes-agent.git")
+    assert not _origin_url_looks_fetchable("")
+    assert not _origin_url_looks_fetchable("not-a-git-repo")
