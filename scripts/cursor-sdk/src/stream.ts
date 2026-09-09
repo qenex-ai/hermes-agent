@@ -17,7 +17,7 @@ export async function consumeStream(run: RunLike, io: StreamIo = defaultIo): Pro
     return;
   }
   for await (const event of run.stream()) {
-    renderEvent(event, io);
+    renderEvent(event as SdkStreamEvent, io);
   }
 }
 

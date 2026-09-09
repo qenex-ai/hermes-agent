@@ -63,6 +63,7 @@ export interface AgentOptionsPlan {
 }
 
 export type RunStatus = "finished" | "error" | "cancelled";
+export type RunOperation = "stream" | "wait" | "cancel" | "conversation";
 
 export interface RunResultLike {
   id: string;
@@ -73,9 +74,9 @@ export interface RunResultLike {
 
 export interface RunLike {
   id: string;
-  supports: (op: "stream" | "wait" | "cancel" | "conversation") => boolean;
-  unsupportedReason?: (op: string) => string | undefined;
-  stream: () => AsyncIterable<SdkStreamEvent>;
+  supports: (op: RunOperation) => boolean;
+  unsupportedReason?: (op: RunOperation) => string | undefined;
+  stream: () => AsyncIterable<{ type: string }>;
   wait: () => Promise<RunResultLike>;
   cancel: () => Promise<void>;
   conversation?: () => Promise<unknown>;
