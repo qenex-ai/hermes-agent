@@ -1014,11 +1014,11 @@ Access tokens have a 15-minute TTL. **There is no refresh token in contract v1**
 
 | Name | Lifetime | Notes |
 |------|----------|-------|
-| `hermes_session_at` | Token TTL (15 min) | HttpOnly, SameSite=Lax, Secure-when-HTTPS |
+| `hermes_session_at` | Token TTL (15 min) | HttpOnly, SameSite=Strict, Secure-when-HTTPS |
 | `hermes_session_pkce` | 10 min | HttpOnly; holds the PKCE verifier + provider hint during the round trip. SameSite=None + Secure over HTTPS (must survive the cross-site IDP redirect chain — Chromium drops SameSite=Lax cookies set on a 302 in a cross-site chain); SameSite=Lax on loopback HTTP |
 | `hermes_session_rt` | unused in v1 | Reserved for forward-compat; not written when `refresh_token` is empty |
 
-All three are `Path=/`. The session cookies are `SameSite=Lax`; the PKCE cookie is `SameSite=None` when set over HTTPS (see table). The `Secure` flag is set when the dashboard is reached over HTTPS (detected via the request URL scheme — honours `X-Forwarded-Proto` from an upstream TLS terminator under `proxy_headers=True`).
+All three are `Path=/`. The authenticated session cookies (`hermes_session_at`, `hermes_session_rt`, `hermes_session_provider`) are `SameSite=Strict` so they are not sent on cross-site requests. The PKCE cookie is `SameSite=None` when set over HTTPS (see table) because it must survive the external IDP redirect. The `Secure` flag is set when the dashboard is reached over HTTPS (detected via the request URL scheme — honours `X-Forwarded-Proto` from an upstream TLS terminator under `proxy_headers=True`).
 
 ### Logout
 

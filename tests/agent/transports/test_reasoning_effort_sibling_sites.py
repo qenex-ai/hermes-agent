@@ -128,3 +128,19 @@ class TestCodexUltraForEveryModel:
                 reasoning_config={"enabled": True, "effort": "ultra"},
             )
             assert kw["reasoning"]["effort"] == wire, model
+
+
+class TestAuxiliaryGenericOpenAICompatFallback:
+    def test_ultra_clamps_to_max_on_generic_extra_body(self):
+        """When no provider profile claims reasoning, auxiliary still must not
+        forward Hermes-only ``ultra`` (OpenRouter HTTP 400 on the wire)."""
+        from agent.auxiliary_client import _ProfileProjection, _merge_aux_extra_body
+
+        merged = _merge_aux_extra_body(
+            None,
+            _ProfileProjection({}, {}, {}, False),
+            {"enabled": True, "effort": "ultra"},
+            "openrouter",
+        )
+        assert merged["reasoning"]["effort"] == "max"
+        assert merged["reasoning"]["enabled"] is True

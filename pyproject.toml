@@ -490,7 +490,6 @@ google-api-python-client = false
 google-auth = false
 google-auth-httplib2 = false
 google-auth-oauthlib = false
-h2 = false
 hindsight-client = false
 honcho-ai = false
 httplib2 = false

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "hermes": {
+      "command": "hermes",
+      "args": ["mcp", "serve"]
+    },
+    "qenex": {
+      "url": "https://mcp.qenex.ai"
+    }
+  }
+}
