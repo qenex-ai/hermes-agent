@@ -484,6 +484,7 @@ from hermes_cli.subcommands.auth import build_auth_parser
 from hermes_cli.subcommands.status import build_status_parser
 from hermes_cli.subcommands.pause import build_pause_parser
 from hermes_cli.subcommands.qenex import build_qenex_parser
+from hermes_cli.subcommands.cursor_sdk import build_cursor_sdk_parser
 from hermes_cli.subcommands.webhook import build_webhook_parser
 from hermes_cli.subcommands.hooks import build_hooks_parser
 from hermes_cli.subcommands.doctor import build_doctor_parser
@@ -12601,6 +12602,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "project", "proxy",
         "prompt-size",
         "qenex",
+        "cursor-sdk",
         "resume",
         "send", "sessions", "setup",
         "skin", "skills", "slack", "status", "sync", "tools", "uninstall", "update",
@@ -13807,6 +13809,11 @@ def main():
     # qenex command  (parser built in hermes_cli/subcommands/qenex.py)
     # =========================================================================
     build_qenex_parser(subparsers)
+
+    # =========================================================================
+    # cursor-sdk command  (parser built in hermes_cli/subcommands/cursor_sdk.py)
+    # =========================================================================
+    build_cursor_sdk_parser(subparsers)
 
     # =========================================================================
     # cron command  (parser built in hermes_cli/subcommands/cron.py)

@@ -2153,3 +2153,20 @@ updates:
 #   # This runs ONCE per process at startup, so it cannot replace a credential
 #   # that expires mid-session. For a single provider whose token needs
 #   # re-minting during a session, use `providers.<name>.key_cmd` instead.
+
+# =============================================================================
+# Cursor SDK (`hermes cursor-sdk`)
+# =============================================================================
+# Behavioral defaults for the TypeScript @cursor/sdk wrapper. Runtime is NOT
+# defaulted here — every invocation must pass --local or --cloud. CURSOR_API_KEY
+# belongs in .env, not in this file.
+# cursor_sdk:
+#   model: composer-2
+#   local:
+#     setting_sources: []          # empty = no ambient Cursor project/user/team config
+#   cloud:
+#     skip_reviewer_request: true  # keep CI quiet
+#     auto_create_pr: false
+#     starting_ref: main
+#     repo: ""                     # default cloud repo URL; CLI --repo overrides
+

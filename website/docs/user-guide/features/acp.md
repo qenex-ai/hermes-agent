@@ -223,6 +223,12 @@ Prerequisites:
 
 Use an ACP-compatible plugin and point it at `hermes acp` or `hermes-acp`.
 
+### Cursor IDE
+
+Do **not** attach Hermes as an ACP agent in Cursor. Cursor already has a coding agent; it should load Hermes as **MCP tools** (`hermes mcp serve`) via [`.cursor/mcp.json`](https://github.com/qenex-ai/hermes-agent/blob/main/.cursor/mcp.json).
+
+Cursor’s own `agent acp` command exposes **Cursor** as an ACP *server* for other editors — the opposite of `hermes acp`. Setup, OAuth, and what `mcp serve` actually exposes: [Use Hermes MCP in Cursor IDE](/guides/cursor-mcp).
+
 ### Buzz Desktop
 
 [Buzz](https://github.com/block/buzz) ships Hermes Agent as a preset runtime.
@@ -392,6 +398,7 @@ or by editing `~/.hermes/.env`. The terminal auth flow (`hermes acp --setup`) ca
 
 ## See also
 
+- [Use Hermes MCP in Cursor IDE](/guides/cursor-mcp) — Cursor consumes Hermes as MCP, not ACP
 - [Buzz ACP harness](https://github.com/block/buzz/tree/main/crates/buzz-acp)
 - [ACP Internals](../../developer-guide/acp-internals.md)
 - [Provider Runtime Resolution](../../developer-guide/provider-runtime.md)
