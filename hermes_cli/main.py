@@ -328,6 +328,8 @@ from hermes_cli.subcommands.logout import build_logout_parser
 from hermes_cli.subcommands.auth import build_auth_parser
 from hermes_cli.subcommands.status import build_status_parser
 from hermes_cli.subcommands.pause import build_pause_parser
+from hermes_cli.subcommands.qenex import build_qenex_parser
+from hermes_cli.subcommands.cursor_sdk import build_cursor_sdk_parser
 from hermes_cli.subcommands.webhook import build_webhook_parser
 from hermes_cli.subcommands.hooks import build_hooks_parser
 from hermes_cli.subcommands.doctor import build_doctor_parser
@@ -2033,6 +2035,8 @@ _FROZEN_UPDATER_SURFACE: dict[str, tuple[str, ...]] = {
         "_cold_start_windows_gateway_after_update", "_defer_update_for_self_lock",
         "_dependency_sync_would_rewrite", "_detect_self_loaded_native_modules",
         "_detect_venv_python_processes", "_discard_stashed_changes",
+        "_ensure_origin_remote",
+        "_fetch_origin_branch",
         "_filter_non_gateway_concurrent_instances", "_fleet_probe_expected_runtimes",
         "_get_origin_url", "_handoff_reapable_backend_pids", "_ledger_manual_serve_holders",
         "_ledger_reapable_backend_pids", "_leftover_pausable_gateway_pids", "_npm_lockfile_changed",
@@ -2616,6 +2620,8 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "model", "monitoring", "pairing", "pause", "peer", "pets", "plugins", "portal", "profile",
         "project", "proxy",
         "prompt-size",
+        "qenex",
+        "cursor-sdk",
         "resume",
         "send", "sessions", "setup",
         "skin", "skills", "slack", "status", "sync", "tools", "uninstall", "update",
@@ -3213,6 +3219,8 @@ def _build_cli_parser():
     build_auth_parser(subparsers, cmd_auth=cmd_auth)
     build_status_parser(subparsers, cmd_status=cmd_status)
     build_pause_parser(subparsers)
+    build_qenex_parser(subparsers)
+    build_cursor_sdk_parser(subparsers)
     build_cron_parser(subparsers, cmd_cron=cmd_cron)
     build_sync_parser(subparsers, cmd_sync=cmd_sync)
     build_webhook_parser(subparsers, cmd_webhook=cmd_webhook)

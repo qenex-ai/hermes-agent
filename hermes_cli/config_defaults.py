@@ -2337,6 +2337,21 @@ DEFAULT_CONFIG = {
         # Extra ports detection probes for an external llama-server (besides 8080).
         "detect_ports": [],
     },
+    # Cursor TypeScript SDK (`hermes cursor-sdk`). Secrets stay in .env (CURSOR_API_KEY);
+    # runtime is NEVER defaulted here — the CLI requires explicit --local or --cloud.
+    "cursor_sdk": {
+        "model": "composer-2",
+        "local": {
+            # Empty = do not load ambient Cursor project/user/team settings.
+            "setting_sources": [],
+        },
+        "cloud": {
+            "skip_reviewer_request": True,
+            "auto_create_pr": False,
+            "starting_ref": "main",
+            "repo": "",
+        },
+    },
     "_config_version": 42,  # Config schema version - bump this when adding new required fields
 }
 
@@ -2596,6 +2611,9 @@ OPTIONAL_ENV_VARS = {
         "Airtable API key", "https://airtable.com/create/tokens"),
     "TENOR_API_KEY": _skill("Tenor API key for GIF search (used by the `gif-search` skill)",
         "Tenor API key", "https://developers.google.com/tenor/guides/quickstart"),
+    "CURSOR_API_KEY": _skill(
+        "Cursor API key for the `cursor-sdk` skill (`hermes cursor-sdk`; user or service-account)",
+        "Cursor API key", "https://cursor.com/dashboard/cloud-agents"),
     # ── Honcho ──
     "HONCHO_API_KEY": _tool("Honcho API key for AI-native persistent memory", "Honcho API key",
         "https://app.honcho.dev", tools=["honcho_context"]),

@@ -5953,7 +5953,13 @@ def _merge_aux_extra_body(
         if reasoning_config.get("enabled") is False:
             merged_extra["reasoning"] = {"enabled": False}
         else:
-            merged_extra["reasoning"] = {"enabled": True, "effort": reasoning_config.get("effort") or "medium"}
+            # Generic OpenAI-compat fallback (OpenRouter 400s on Hermes-only ``ultra``).
+            from agent.reasoning_effort import OPENAI_COMPAT_WIRE_EFFORTS, clamp_effort
+            effort = clamp_effort(
+                reasoning_config.get("effort") or "medium",
+                OPENAI_COMPAT_WIRE_EFFORTS,
+            )
+            merged_extra["reasoning"] = {"enabled": True, "effort": effort}
     # Portal tags + sticky session_id fallback when the profile didn't supply them; session_id
     # keeps aux calls on the main turn's upstream instance (cache warmth) — tags alone are not
     # enough on /v1/messages.

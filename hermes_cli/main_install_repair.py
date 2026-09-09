@@ -966,7 +966,14 @@ def _install_python_dependencies_with_optional_fallback(
         _install(["install", "-e", f".[{group}]"])
         _verify_console_scripts_installed(install_cmd_prefix, env=env)
         return
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as exc:
+        from hermes_cli._install_repair import (
+            _INDEX_UNREACHABLE_NOTICE,
+            install_failure_is_index_unreachable,
+        )
+        if install_failure_is_index_unreachable(exc):
+            print(_INDEX_UNREACHABLE_NOTICE)
+            raise
         print(
             "  ⚠ Optional extras failed, reinstalling base dependencies and retrying extras individually..."
         )

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "docusaurus-2",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build && node scripts/stage-hosted.mjs",
+  "outputDirectory": "hosted",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/docs/",
+      "permanent": false
+    }
+  ]
+}
