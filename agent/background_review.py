@@ -235,7 +235,7 @@ def _resolve_review_runtime(agent: Any, task_cfg: Optional[Dict[str, Any]] = Non
             "provider": rp.get("provider") or task_provider, "model": rp.get("model") or task_model,
             **{key: rp.get(key) for key in ("api_key", "base_url", "api_mode", "credential_pool", "command")},
             "request_overrides": dict(rp.get("request_overrides") or {}),
-            "max_tokens": rp.get("max_output_tokens"), "args": list(rp.get("args") or []), "routed": True,
+            "args": list(rp.get("args") or []), "routed": True,
         }
     except Exception as e:
         logger.debug("background-review aux routing failed (%s); using main model", e)
@@ -612,11 +612,31 @@ def _prior_tool_keys(prior_snapshot: List[Dict]) -> Tuple[set, set]:
 
 def _action_lines(data: Dict, detail: Dict, verbose: bool) -> List[str]:
     """Summary line(s) for one successful notify-tool result (``[]`` when nothing to report)."""
+    if data.get("staged"):
+        return []
     message = data.get("message", "")
     target = data.get("target", "") or detail.get("target", "")
     is_skill = detail.get("tool") == "skill_manage"
+    if is_skill and "results" in data:
+        # The requested operations are not evidence of applied writes (approval
+        # and atomic rollback can leave all of them unapplied).
+        verbs = {"create": "created", "patch": "patched", "edit": "rewritten",
+                 "write_file": "written", "remove_file": "removed", "delete": "deleted"}
+        results = data.get("results")
+        if not data.get("operations_applied") or not isinstance(results, list):
+            return []
+        lines = []
+        for result in results:
+            if not isinstance(result, dict) or result.get("success") is not True:
+                continue
+            verb = verbs.get(result.get("action"))
+            if verb and result.get("name"):
+                path = f" ({result['file_path']})" if result.get("file_path") else ""
+                lines.append(f"Skill '{result['name']}' {verb}{path}")
+        return lines
     lower = message.lower()
-    if not verbose and ("created" in lower or "updated" in lower or (is_skill and "patched" in lower)):
+    if not verbose and ("created" in lower or "updated" in lower or
+                        (is_skill and any(word in lower for word in ("patched", "deleted", "written")))):
         return [message]
     if not is_skill and not target:
         return []
@@ -822,6 +842,23 @@ def _fork_init_kwargs(agent: Any, rt: Dict[str, Any], routed: bool, max_iteratio
     return kwargs
 
 
+# Above any live registry generation: _publish_tool_snapshot refuses an older-generation rebuild,
+# so the compaction-boundary refresh_agent_mcp_tools(content_aware=True) cannot rebuild the fork's
+# tools[] from the live registry and drop the inherited provider/plugin tools (#103579).
+_FROZEN_TOOL_SNAPSHOT_GENERATION = 2_147_483_647
+
+
+def _inherit_parent_tool_surface(review_agent: Any, agent: Any) -> None:
+    """Same-model fork: advertise the parent's exact tools[] (its last outbound payload — an
+    empty list included) so the request prefix matches byte-for-byte, then freeze the snapshot
+    generation. Dispatch stays behind the review whitelist; advertising is not permission."""
+    # getattr: /btw and review callers build bare object.__new__ agents in tests without ``tools``.
+    review_agent.tools = copy.deepcopy(getattr(agent, "tools", None) or [])
+    review_agent.valid_tool_names = {tool["function"]["name"] for tool in review_agent.tools}
+    review_agent._tool_snapshot_generation = _FROZEN_TOOL_SNAPSHOT_GENERATION
+
+
+
 def build_cache_parity_fork(
     agent: Any, task_cfg: Optional[Dict[str, Any]] = None, *, max_iterations: int,
     write_origin: str = "background_review",
@@ -851,7 +888,7 @@ def build_cache_parity_fork(
     # finalize the parent's still-active session row. suppress_status_output: fork status/warning
     # emits go via _print_fn/status_callback, which bypass the stdout redirect.
     review_agent._skip_mcp_refresh = review_agent._persist_disabled = review_agent.suppress_status_output = True
-    review_agent._session_json_enabled = review_agent._end_session_on_close = False
+    review_agent._end_session_on_close = False
     review_agent._session_db = None
     review_agent.session_id = agent.session_id
     # Same model only: share the warm cached system prompt (~26% cost cut; a rebuilt prompt misses
@@ -867,6 +904,7 @@ def build_cache_parity_fork(
     if not _routed:
         review_agent._cached_system_prompt = agent._cached_system_prompt
         review_agent.session_start = agent.session_start
+        _inherit_parent_tool_surface(review_agent, agent)
     _detach_fork_compression(review_agent)
     # Compaction bounds a single request; this bounds the WHOLE review (checked in
     # conversation_loop via _review_input_budget_exhausted).
