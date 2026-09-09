@@ -2,8 +2,10 @@
 # Idempotent Cloud Agent bootstrap for hermes-agent.
 #
 # Prepares the full development experience against Cursor's default base image:
-#   * uv + a Python 3.11 virtualenv at ./.venv with the project installed
-#     editable, all extras and dev tooling (".[all,dev]").
+#   * uv + a Python 3.11 virtualenv at ./.venv from uv.lock (`uv sync --frozen`)
+#     with the same extras as `.github/workflows/tests.yml` so
+#     `scripts/run_tests.sh` can run under HERMES_DISABLE_LAZY_INSTALLS=1
+#     without mid-run pip.
 #   * Node.js pinned by .nvmrc (>= the root package.json `engines` floor), so
 #     the JS workspaces (dashboard, TUI) and browser tools resolve.
 #   * The `web` dashboard workspace, built into hermes_cli/web_dist so
@@ -11,6 +13,9 @@
 #   * Interactive shells auto-activate the venv so `hermes`, `python`, `pytest`,
 #     `ruff`, and `ty` resolve to the project interpreter.
 #
+# The personal Cursor environment's `install` command points at this path.
+# Recurring environment builds fail with exit 127 when the file is missing.
+# Non-interactive; does not start servers.
 # Safe to run repeatedly: every step is a no-op refresh when already satisfied.
 set -euo pipefail
 
@@ -26,12 +31,20 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 uv --version
 
-echo "▶ [2/5] Creating Python 3.11 venv and installing project (.[all,dev])"
-# .python-version pins 3.11; uv fetches it if the interpreter is missing.
-uv venv .venv --allow-existing --python "$(cat .python-version 2>/dev/null || echo 3.11)"
+echo "▶ [2/5] Creating Python 3.11 venv from uv.lock (all, dev, and test extras)"
+# `uv sync --frozen` installs uv.lock as-is without rewriting it. `--locked`
+# fails here when pyproject exclude-newer exceptions (e.g. `h2`) have expired
+# relative to the lockfile; environment bootstrap must not run `uv lock`.
+# Prefer the already-provisioned 3.11 interpreter (CI's version / .python-version)
+# so we do not pull 3.14 via UV_PYTHON.
+PYTHON_VERSION="$(cat .python-version 2>/dev/null || echo 3.11)"
+uv sync --frozen --python "$PYTHON_VERSION" \
+  --extra all --extra dev \
+  --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
 # shellcheck disable=SC1091
 source .venv/bin/activate
-uv pip install -e ".[all,dev]"
+.venv/bin/python -c 'import hermes_cli, pytest; print("cloud-agent-install: ok")'
 
 echo "▶ [3/5] Installing Node.js $(cat .nvmrc 2>/dev/null || echo 26) via nvm"
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
