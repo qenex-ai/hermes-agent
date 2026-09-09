@@ -180,10 +180,12 @@ _ORIGIN_URL_CACHE = ".update_origin_url"
 
 
 def _origin_url_looks_fetchable(url: Optional[str]) -> bool:
-    """True when ``url`` is an HTTPS/SSH git URL or an existing local path.
+    """True when ``url`` is an HTTPS/SSH git URL or a local git repo/bundle.
 
-    A missing ``origin`` remote, an empty URL, or a leftover local path is what
-    produces git's ``'origin' does not appear to be a git repository``.
+    A missing ``origin`` remote, an empty URL, or a leftover local path that is
+    not a git repository is what produces git's
+    ``'origin' does not appear to be a git repository``. An existing directory
+    without ``.git`` is not fetchable.
     """
     u = (url or "").strip()
     if not u:
@@ -191,7 +193,10 @@ def _origin_url_looks_fetchable(url: Optional[str]) -> bool:
     if u.startswith(("https://", "http://", "git@", "ssh://", "git://", "file://")):
         return True
     try:
-        return Path(u).expanduser().exists()
+        p = Path(u).expanduser()
+        if p.is_file():
+            return True
+        return p.is_dir() and (p / ".git").exists()
     except Exception:
         return False
 
@@ -309,13 +314,14 @@ def _ensure_origin_remote(git_cmd: list[str], cwd: Path, *, force: bool = False)
         recalled = _recalled_origin_url()
         if recalled:
             picked = ("last successful update", recalled)
+        elif existing and _origin_url_looks_fetchable(existing):
+            # Config still has a URL (or force=True after git rejected origin).
+            # Rewrite the remote to that URL — do not return it without add/set-url.
+            picked = ("configured origin URL", existing)
         elif not sibling_names:
             # Zero remotes (or origin pointing at garbage): invent official Nous
             # so `git fetch origin` can unstick. Never guess among leftover
-            # non-hermes remotes, and never overwrite a still-fetchable origin.
-            if existing and _origin_url_looks_fetchable(existing):
-                _remember_origin_url(existing)
-                return existing
+            # non-hermes remotes.
             picked = ("official Hermes repository", OFFICIAL_REPO_URL)
         else:
             return None
@@ -337,6 +343,54 @@ def _ensure_origin_remote(git_cmd: list[str], cwd: Path, *, force: bool = False)
         print("      git remote set-url origin <your-fork-url>")
     _remember_origin_url(restored)
     return restored
+
+
+def _fetch_origin_branch(git_cmd, cwd, branch: str, extra_args: Optional[list] = None):
+    """Fetch ``branch`` from origin, restoring origin and fetching by URL if needed.
+
+    ``git fetch origin`` is what production dies on when the remote is gone
+    (``fatal: 'origin' does not appear to be a git repository``). After
+    restore+retry still missing origin, fetch the last-known or official URL
+    directly into ``refs/remotes/origin/<branch>`` — that does not require a
+    working ``origin`` remote — then point origin at that URL.
+    """
+    from hermes_cli.update_cmd import _ensure_origin_remote, _git_run
+
+    extra = list(extra_args or [])
+    _ensure_origin_remote(git_cmd, cwd)
+    result = _git_run(git_cmd, ["fetch", *extra, "origin", branch], cwd, network=True)
+    if result.returncode == 0:
+        return result
+    if not _stderr_is_missing_origin(result.stderr or ""):
+        return result
+    print("→ Origin remote unusable — restoring and retrying fetch...")
+    _ensure_origin_remote(git_cmd, cwd, force=True)
+    result = _git_run(git_cmd, ["fetch", *extra, "origin", branch], cwd, network=True)
+    if result.returncode == 0 or not _stderr_is_missing_origin(result.stderr or ""):
+        return result
+    urls: list[str] = []
+    recalled = _recalled_origin_url()
+    if recalled:
+        urls.append(recalled)
+    if OFFICIAL_REPO_URL not in urls:
+        urls.append(OFFICIAL_REPO_URL)
+    refspec = f"{branch}:refs/remotes/origin/{branch}"
+    last = result
+    for url in urls:
+        print(f"→ Fetching {branch} from {url} (no usable origin remote)...")
+        last = _git_run(git_cmd, ["fetch", *extra, url, refspec], cwd, network=True)
+        if last.returncode != 0:
+            continue
+        listed = _git_stdout(git_cmd, ["remote"], cwd) or ""
+        names = {line.strip() for line in listed.splitlines() if line.strip()}
+        if "origin" in names:
+            _git_ok(git_cmd, ["remote", "set-url", "origin", url], cwd)
+        else:
+            _git_ok(git_cmd, ["remote", "add", "origin", url], cwd)
+        _remember_origin_url(url)
+        print(f"  ✓ origin → {url}")
+        return last
+    return last
 
 
 def _is_fork(origin_url: Optional[str]) -> bool:

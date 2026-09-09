@@ -2022,6 +2022,8 @@ _FROZEN_UPDATER_SURFACE: dict[str, tuple[str, ...]] = {
         "_cold_start_windows_gateway_after_update", "_defer_update_for_self_lock",
         "_dependency_sync_would_rewrite", "_detect_self_loaded_native_modules",
         "_detect_venv_python_processes", "_discard_stashed_changes",
+        "_ensure_origin_remote",
+        "_fetch_origin_branch",
         "_filter_non_gateway_concurrent_instances", "_fleet_probe_expected_runtimes",
         "_get_origin_url", "_handoff_reapable_backend_pids", "_ledger_manual_serve_holders",
         "_ledger_reapable_backend_pids", "_leftover_pausable_gateway_pids", "_npm_lockfile_changed",

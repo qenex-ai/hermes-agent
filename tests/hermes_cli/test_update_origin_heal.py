@@ -147,10 +147,73 @@ def test_ambiguous_non_hermes_remotes_do_not_invent_official(tmp_path):
     assert "origin" not in _git(repo, "remote").split()
 
 
-def test_origin_url_looks_fetchable_rejects_garbage():
+def test_origin_url_looks_fetchable_rejects_garbage(tmp_path):
     from hermes_cli.update_cmd_git import _origin_url_looks_fetchable
 
     assert _origin_url_looks_fetchable(OFFICIAL)
     assert _origin_url_looks_fetchable("git@github.com:NousResearch/hermes-agent.git")
     assert not _origin_url_looks_fetchable("")
     assert not _origin_url_looks_fetchable("not-a-git-repo")
+    empty = tmp_path / "empty-dir"
+    empty.mkdir()
+    assert not _origin_url_looks_fetchable(str(empty))
+    repo = _init_repo(tmp_path)
+    assert _origin_url_looks_fetchable(str(repo))
+
+
+def test_local_non_git_origin_is_replaced_with_official(tmp_path, capsys):
+    """An origin URL that exists on disk but is not a git repo must not be kept."""
+    junk = tmp_path / "not-a-repo"
+    junk.mkdir()
+    repo = _init_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", str(junk))
+    url = update_cmd._ensure_origin_remote(["git"], repo)
+    assert url == OFFICIAL
+    assert _git(repo, "config", "--get", "remote.origin.url") == OFFICIAL
+    assert "official Hermes repository" in capsys.readouterr().out
+
+
+def test_fetch_by_url_creates_origin_ref_when_remote_is_gone(tmp_path, monkeypatch):
+    """Invariant: `git fetch <url> branch:refs/remotes/origin/<branch>` unsticks
+    a checkout that cannot `git fetch origin`."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _git(src, "init")
+    (src / "readme").write_text("ok\n", encoding="utf-8")
+    _git(src, "-c", "user.email=t@t", "-c", "user.name=t", "add", "readme")
+    _git(src, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init")
+    branch = _git(src, "rev-parse", "--abbrev-ref", "HEAD")
+    dest = _init_repo(tmp_path)
+
+    monkeypatch.setattr(update_cmd, "_ensure_origin_remote", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "hermes_cli.update_cmd_git._recalled_origin_url", lambda: str(src)
+    )
+
+    result = update_cmd._fetch_origin_branch(["git"], dest, branch)
+    assert result.returncode == 0
+    assert _git(dest, "rev-parse", "--verify", f"origin/{branch}")
+    assert _git(dest, "config", "--get", "remote.origin.url") == str(src)
+
+
+def test_early_recovery_heals_origin_without_an_install_marker(tmp_path, capsys):
+    """Invariant: a normal `hermes` launch restores origin even with no update marker."""
+    from hermes_cli import _early_recovery as er
+
+    repo = _init_repo(tmp_path)
+    er.recover_if_needed(project_root=repo, argv=[])
+    assert _git(repo, "config", "--get", "remote.origin.url") == OFFICIAL
+    err = capsys.readouterr().err
+    assert "Restored git remote 'origin'" in err
+
+
+def test_early_recovery_remembers_existing_origin(tmp_path):
+    from hermes_cli import _early_recovery as er
+    from hermes_constants import get_hermes_home
+
+    repo = _init_repo(tmp_path)
+    _git(repo, "remote", "add", "origin", FORK)
+    er.recover_if_needed(project_root=repo, argv=[])
+    cache = Path(get_hermes_home()) / ".update_origin_url"
+    assert cache.read_text(encoding="utf-8").strip() == FORK
+    assert _git(repo, "config", "--get", "remote.origin.url") == FORK
