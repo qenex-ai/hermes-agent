@@ -31,6 +31,9 @@ Project config: [`.cursor/mcp.json`](https://github.com/qenex-ai/hermes-agent/bl
     },
     "qenex": {
       "url": "https://mcp.qenex.ai"
+    },
+    "supabase": {
+      "url": "https://mcp.supabase.com/mcp?project_ref=tmsvyuxaiozmcxdaaqeu&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
     }
   }
 }
@@ -51,12 +54,16 @@ A live probe of `mcp.qenex.ai` (2026-09-09):
 
 The committed `url` is therefore `https://mcp.qenex.ai`, matching the OAuth `resource` field. If ops later mounts Streamable HTTP at `/mcp`, update `.cursor/mcp.json` to `https://mcp.qenex.ai/mcp`.
 
+**`supabase` (HTTP):** hosted Supabase MCP, scoped to the QENEX `qenex` project (`tmsvyuxaiozmcxdaaqeu`). Cursor prompts for **OAuth** on first connect. Do not put a personal access token in the project file. After authorizing, restart the session so tools load.
+
+Vendor skills live in [`.agents/skills/`](https://github.com/qenex-ai/hermes-agent/blob/main/.agents/skills) (`npx skills add supabase/agent-skills -a cursor -y`, pinned by `skills-lock.json`).
+
 ## Enable
 
 1. Install Hermes so `hermes doctor` works in a login shell.
 2. Open this repo in Cursor. Project MCP servers load from `.cursor/mcp.json`.
-3. **Cursor Settings → MCP**: enable `hermes` and `qenex`; complete QENEX OAuth if prompted.
-4. Confirm messaging-bridge tools appear — not an ACP Hermes session panel.
+3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, and `supabase`; complete QENEX and Supabase OAuth if prompted.
+4. Confirm messaging-bridge tools appear — not an ACP Hermes session panel. Confirm Supabase tools such as `list_tables` appear for project `tmsvyuxaiozmcxdaaqeu`.
 
 ## See also
 

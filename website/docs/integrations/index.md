@@ -75,7 +75,7 @@ Speech-to-text supports eight providers: local faster-whisper (free, runs on-dev
 
 ## IDE & Editor Integration
 
-- **[Hermes MCP in Cursor IDE](/guides/cursor-mcp)** — Cursor already has a coding agent. Point it at `hermes mcp serve` (messaging-bridge tools) plus the QENEX HTTP MCP server. Do not run Hermes as an ACP agent inside Cursor.
+- **[Hermes MCP in Cursor IDE](/guides/cursor-mcp)** — Cursor already has a coding agent. Point it at `hermes mcp serve` (messaging-bridge tools) plus the QENEX and project-scoped Supabase HTTP MCP servers. Do not run Hermes as an ACP agent inside Cursor.
 - **[IDE Integration (ACP)](/user-guide/features/acp)** — Use Hermes Agent inside ACP-compatible editors such as VS Code, Zed, and JetBrains. Hermes runs as an ACP server, rendering chat messages, tool activity, file diffs, and terminal commands inside your editor.
 
 ## Programmatic Access
