@@ -59,12 +59,26 @@ The committed URL is therefore the **origin**, which matches the OAuth resource 
 
 Do not put bearer tokens in `mcp.json`. Let Cursor’s OAuth flow (or your user-level Cursor MCP headers) supply credentials.
 
+### `supabase` (HTTP MCP)
+
+```json
+"supabase": {
+  "url": "https://mcp.supabase.com/mcp?project_ref=tmsvyuxaiozmcxdaaqeu&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
+}
+```
+
+Hosted Supabase MCP, **project-scoped** to the QENEX `qenex` project (`tmsvyuxaiozmcxdaaqeu`). Feature groups match the dashboard export: docs, account, database, debugging, development, functions, branching. Storage stays off (Supabase default). Cursor prompts for **OAuth** on first connect — do not put a PAT in the project file.
+
+Project-scoped mode disables account-management tools even if `account` is listed in `features`. Restart the Cursor session after authorizing so tools load.
+
+Vendor agent skills: `npx skills add supabase/agent-skills -a cursor -y` installs `supabase` and `supabase-postgres-best-practices` into `.agents/skills/` (pinned by `skills-lock.json`).
+
 ## Enable in Cursor
 
 1. Install Hermes so `hermes` is on your shell PATH (`hermes doctor` should work).
 2. Open this repo in Cursor. Project MCP servers load from `.cursor/mcp.json`.
-3. **Cursor Settings → MCP**: enable `hermes` and `qenex`. Approve QENEX OAuth if prompted.
-4. Confirm `hermes` tools such as `conversations_list` / `messages_send` appear — not the Hermes ACP session UI.
+3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, and `supabase`. Approve QENEX and Supabase OAuth if prompted.
+4. Confirm `hermes` tools such as `conversations_list` / `messages_send` appear — not the Hermes ACP session UI. Confirm Supabase tools such as `list_tables` / `execute_sql` appear for project `tmsvyuxaiozmcxdaaqeu`.
 
 User-level Cursor MCP config (`~/.cursor/mcp.json`) is fine for personal servers; keep fork defaults in the project file so the checkout is self-describing.
 
