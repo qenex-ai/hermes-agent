@@ -42,6 +42,10 @@ async function main(): Promise<number> {
     process.stderr.write(`[cursor-sdk] ${message}\n`);
     return 1;
   }
+  // JSON payloads must not be interleaved with assistant stream tokens.
+  if (process.argv.includes("--json")) {
+    request.stream = false;
+  }
   const outcome = await runInvocation(request, sdk);
   if (process.argv.includes("--json")) {
     process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);

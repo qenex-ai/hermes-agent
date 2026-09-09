@@ -131,6 +131,8 @@ def build_request(args: Any, *, cwd: str | None = None) -> dict[str, Any]:
     repo = getattr(args, "repo", None) or cloud_cfg.get("repo")
     starting_ref = getattr(args, "ref", None) or cloud_cfg.get("starting_ref") or "main"
     repos = [{"url": repo, "startingRef": starting_ref}] if repo else []
+    if runtime == "cloud" and action in {"prompt", "send", "resume"} and not repos:
+        raise CursorSdkError("cloud runtime requires --repo <url> (cloud.repos)")
 
     skip_reviewer = getattr(args, "skip_reviewer_request", None)
     if skip_reviewer is None:
@@ -149,7 +151,8 @@ def build_request(args: Any, *, cwd: str | None = None) -> dict[str, Any]:
         "skipReviewerRequest": bool(skip_reviewer),
         "autoCreatePR": auto_pr,
         "settingSources": list(setting_sources),
-        "stream": not bool(getattr(args, "no_stream", False)),
+        # --json must not interleave assistant tokens with the InvocationResult payload.
+        "stream": not bool(getattr(args, "no_stream", False) or getattr(args, "json", False)),
         "cancelAfterMs": getattr(args, "cancel_after_ms", None),
     }
     if prompt:

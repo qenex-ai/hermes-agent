@@ -92,7 +92,9 @@ export function inspectOptions(request: SdkRequest): Record<string, unknown> {
     if (!cwd) throw new PlanError("local runtime requires cwd");
     return { runtime: "local", cwd, apiKey: request.apiKey };
   }
-  return { runtime: "cloud", apiKey: request.apiKey, agentId: request.agentId };
+  const opts: Record<string, unknown> = { runtime: "cloud", apiKey: request.apiKey };
+  if (request.agentId) opts.agentId = request.agentId;
+  return opts;
 }
 
 export function validateRequest(request: SdkRequest): void {

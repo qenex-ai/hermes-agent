@@ -89,6 +89,8 @@ def test_explicit_runtime_required_and_cloud_options(hermes_env, tmp_path):
         build_request(_ns(local=False, cloud=False))
     with pytest.raises(CursorSdkError, match="not both"):
         build_request(_ns(local=True, cloud=True))
+    with pytest.raises(CursorSdkError, match="--repo"):
+        build_request(_ns(local=False, cloud=True, repo=None))
 
     cloud = build_request(
         _ns(
@@ -147,6 +149,7 @@ def test_cmd_exit_codes_and_pattern_via_injected_runner(hermes_env, capsys):
     args = _ns(cursor_sdk_command="send", prompt=["go"], json=True)
     assert cmd_cursor_sdk(args, runner=fake_runner) == 2
     assert seen["request"]["pattern"] == "send"
+    assert seen["request"]["stream"] is False
     assert seen["json"] is True
 
     args = argparse.Namespace(cursor_sdk_command=None)

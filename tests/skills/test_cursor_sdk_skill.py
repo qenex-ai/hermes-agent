@@ -8,7 +8,6 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 SKILL_PATH = REPO / "skills" / "software-development" / "cursor-sdk" / "SKILL.md"
-RUNNER = REPO / "scripts" / "cursor-sdk" / "src" / "cli.ts"
 
 
 def _frontmatter_and_body():
@@ -21,9 +20,8 @@ def _frontmatter_and_body():
     return fm, body
 
 
-def test_skill_and_runner_exist():
+def test_skill_and_python_wrapper_exist():
     assert SKILL_PATH.is_file()
-    assert RUNNER.is_file()
     assert (REPO / "hermes_cli" / "cursor_sdk_cmd.py").is_file()
 
 
