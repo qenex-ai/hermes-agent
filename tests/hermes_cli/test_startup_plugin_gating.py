@@ -120,8 +120,6 @@ def test_qenex_and_cursor_sdk_are_builtin_and_registered():
         assert name in subparsers.choices
 
 
-
-
 # ── _resolve_deferred_platform_cli_command (issue #54678) ──────────────────
 
 
