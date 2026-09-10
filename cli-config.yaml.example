@@ -513,8 +513,10 @@ terminal:
 #     transport_fallback: deny  # Set builtin to opt into fallback on transport failure
 #   billing_wallet:
 #     bind_company_keys: true   # Company OpenRouter/AI-Gateway keys never attach to a
-#                               # hijacked last-rung / auto-detect hop. The requestor
-#                               # pays with their own key, or the call fails closed.
+#                               # hijacked last-rung, aux/vision auto-detect hop, or
+#                               # redirected tool host (FIRECRAWL_API_URL, TAVILY_BASE_URL,
+#                               # STT/TTS base URLs). The requestor pays with their own key,
+#                               # or the call fails closed.
 
 # =============================================================================
 # Browser Tool Configuration

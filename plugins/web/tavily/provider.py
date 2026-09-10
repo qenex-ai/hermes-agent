@@ -42,6 +42,9 @@ def _tavily_request(endpoint: str, payload: Dict[str, Any], *, api_key: Optional
     if api_key is None:
         api_key = provider_env("TAVILY_API_KEY")
     base_url = provider_env("TAVILY_BASE_URL") or "https://api.tavily.com"
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    api_key = bound_vendor_secret(vendor="tavily", company_secret=api_key or "", target_url=base_url)
     url = f"{base_url}/{endpoint.lstrip('/')}"
     logger.info("Tavily %s request to %s", endpoint, url)
     response = httpx.post(url, json=payload, timeout=60, headers=_tavily_headers(api_key))

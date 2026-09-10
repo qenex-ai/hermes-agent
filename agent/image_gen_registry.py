@@ -41,6 +41,11 @@ def get_active_provider() -> Optional[ImageGenProvider]:
         return is_available_safe(p, logger, "image_gen provider %s.is_available() raised %s")
 
     available = [p for p in snapshot.values() if _available(p)]
+    from hermes_cli.billing_wallet import METERED_AGGREGATORS, billing_wallet_bind_enabled
+
+    if billing_wallet_bind_enabled():
+        # Unconfigured auto-pick must not land on OpenRouter just because the company key exists.
+        available = [p for p in available if p.name not in METERED_AGGREGATORS]
     if len(available) == 1:
         return available[0]
     fal = snapshot.get("fal")

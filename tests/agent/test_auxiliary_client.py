@@ -1571,11 +1571,12 @@ class TestGetProviderChain:
         assert "openai-codex" not in labels
 
     def test_picks_up_patched_functions(self):
-        """Patches on _try_* functions must be visible in the chain."""
-        sentinel = lambda: ("patched", "model")
+        """Patches on _try_* functions must be visible when the chain runs."""
+        sentinel = lambda *args, **kwargs: ("patched", "model")
         with patch("agent.auxiliary_client._try_openrouter", sentinel):
             chain = _get_provider_chain()
-        assert chain[0] == ("openrouter", sentinel)
+            assert chain[0][0] == "openrouter"
+            assert chain[0][1]() == ("patched", "model")
 
 
 class TestTryPaymentFallback:
@@ -3360,9 +3361,9 @@ class TestVisionAutoSkipsKimiCoding:
     on every request (#17076).
     """
 
-    def test_kimi_coding_skipped_falls_through_to_openrouter(self, monkeypatch):
-        """kimi-coding as main + vision auto → OpenRouter (not kimi)."""
-        fake_or_client = MagicMock(name="openrouter_client")
+    def test_kimi_coding_skipped_does_not_spend_company_openrouter(self, monkeypatch):
+        """kimi-coding as main + vision auto must not attach the company OpenRouter key."""
+        fake_nous_client = MagicMock(name="nous_client")
 
         monkeypatch.setattr(
             "agent.auxiliary_client._read_main_provider", lambda: "kimi-coding",
@@ -3370,20 +3371,28 @@ class TestVisionAutoSkipsKimiCoding:
         monkeypatch.setattr(
             "agent.auxiliary_client._read_main_model", lambda: "kimi-code",
         )
-        # Guard: if the skip doesn't fire, _resolve_strict_vision_backend
-        # and resolve_provider_client both would try kimi-coding — detect
-        # either via the main-provider call and fail loud.
         rpc_mock = MagicMock(side_effect=AssertionError(
             "resolve_provider_client should NOT be called for kimi-coding "
             "on the vision auto path"))
         monkeypatch.setattr(
             "agent.auxiliary_client.resolve_provider_client", rpc_mock,
         )
+        captured = {}
+
+        def fake_try_openrouter(*, requested="openrouter", **_kwargs):
+            captured["requested"] = requested
+            return None, None
+
+        monkeypatch.setattr("agent.auxiliary_client._try_openrouter", fake_try_openrouter)
 
         def fake_strict(provider, model=None):
             if provider == "openrouter":
-                return fake_or_client, "google/gemini-3-flash-preview"
+                raise AssertionError(
+                    "strict OpenRouter vision must not run on a named-vendor auto hop"
+                )
             if provider == "nous":
+                return fake_nous_client, "mimo-v2-omni"
+            if provider == "deepinfra":
                 return None, None
             raise AssertionError(
                 f"strict vision backend should not be called for {provider!r} "
@@ -3395,9 +3404,9 @@ class TestVisionAutoSkipsKimiCoding:
         )
 
         provider, client, model = resolve_vision_provider_client()
-        assert provider == "openrouter"
-        assert client is fake_or_client
-        assert model == "google/gemini-3-flash-preview"
+        assert captured.get("requested") == "kimi-coding"
+        assert provider == "nous"
+        assert client is fake_nous_client
 
 
 

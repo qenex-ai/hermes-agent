@@ -2151,7 +2151,14 @@ def _warn_paid_lane_once(model: str) -> None:
     )
 
 
-def _try_openrouter(explicit_api_key: str = None, model: str = None) -> Tuple[Optional[OpenAI], Optional[str]]:
+def _try_openrouter(
+    explicit_api_key: str = None, model: str = None, requested: str = "openrouter",
+) -> Tuple[Optional[OpenAI], Optional[str]]:
+    """Build an OpenRouter aux client. Company/pool keys attach only when ``requested`` is
+    wallet-eligible (openrouter / auto / custom / local). Discovery and payment-fallback pass
+    the failed main provider so a named-vendor hop cannot spend the company wallet; a
+    requestor ``explicit_api_key`` still attaches — they pay. Default ``requested=openrouter``
+    preserves the explicit-branch / unit-test path."""
     free_only, cfg_model = _aux_openrouter_settings()
     or_model = model or cfg_model
     if free_only and not _is_free_model(or_model):
@@ -2164,24 +2171,42 @@ def _try_openrouter(explicit_api_key: str = None, model: str = None) -> Tuple[Op
         return None, None
     if not _is_free_model(or_model):
         _warn_paid_lane_once(or_model)
+    from hermes_cli.billing_wallet import (
+        aggregator_api_key_candidates, bound_vendor_secret, company_openrouter_wallet_eligible,
+        record_billing_hijack,
+    )
+
+    eligible = company_openrouter_wallet_eligible(requested=requested)
     pool_present, entry = _select_pool_entry("openrouter")
-    if pool_present:
-        or_key = explicit_api_key or _pool_runtime_api_key(entry)
-        if or_key:
-            base_url = _pool_runtime_base_url(entry, OPENROUTER_BASE_URL) or OPENROUTER_BASE_URL
-            logger.debug("Auxiliary client: OpenRouter via pool")
-            return _create_openai_client(
-                api_key=or_key, base_url=base_url, default_headers=build_or_headers()
-            ), or_model
-        # Exhausted pool: fall through to OPENROUTER_API_KEY rather than fail.
-        logger.debug("Auxiliary client: OpenRouter pool exhausted, trying OPENROUTER_API_KEY")
-    or_key = explicit_api_key or _scoped_key_env("OPENROUTER_API_KEY")
+    pool_key = _pool_runtime_api_key(entry) if pool_present else ""
+    env_key = _scoped_key_env("OPENROUTER_API_KEY")
+    candidates = aggregator_api_key_candidates(
+        requested=requested, explicit_api_key=explicit_api_key, company_keys=(pool_key, env_key),
+    )
+    or_key = next((k for k in candidates if k), "")
+    if not eligible:
+        record_billing_hijack(
+            reason="aux-openrouter-requestor-pays" if or_key else "aux-openrouter-blocked",
+            requested=requested or "",
+            destination=OPENROUTER_BASE_URL,
+            requestor_paid=bool(str(explicit_api_key or "").strip()),
+        )
     if not or_key:
-        _mark_provider_unhealthy("openrouter", ttl=60)
+        if eligible:
+            _mark_provider_unhealthy("openrouter", ttl=60)
+        return None, None
+    base_url = OPENROUTER_BASE_URL
+    if eligible and pool_key and or_key == pool_key:
+        base_url = _pool_runtime_base_url(entry, OPENROUTER_BASE_URL) or OPENROUTER_BASE_URL
+    or_key = bound_vendor_secret(
+        vendor="openrouter", company_secret=or_key if eligible else "",
+        explicit_secret=str(explicit_api_key or "").strip(), target_url=base_url,
+    )
+    if not or_key:
         return None, None
     logger.debug("Auxiliary client: OpenRouter")
     return _create_openai_client(
-        api_key=or_key, base_url=OPENROUTER_BASE_URL, default_headers=build_or_headers()
+        api_key=or_key, base_url=base_url, default_headers=build_or_headers()
     ), or_model
 
 
@@ -2890,13 +2915,17 @@ def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str,
     return normalized
 
 
-def _get_provider_chain() -> List[tuple]:
+def _get_provider_chain(*, openrouter_requested: str = "openrouter") -> List[tuple]:
     """Ordered provider detection chain, built at call time so ``_try_*`` patches are picked up.
 
     ``openai-codex`` is deliberately absent (shifting allow-list breaks guessed-model fallback).
+    OpenRouter company keys attach only when ``openrouter_requested`` is wallet-eligible.
     """
+    def try_openrouter():
+        return _try_openrouter(requested=openrouter_requested)
+
     return [
-        ("openrouter", _try_openrouter), ("nous", _try_nous),
+        ("openrouter", try_openrouter), ("nous", _try_nous),
         ("local/custom", _try_custom_endpoint), ("api-key", _resolve_api_key_provider),
     ]
 
@@ -3834,7 +3863,7 @@ def _try_payment_fallback(
     skip_backend = _failed_backend_skip(
         failed_provider, None, failed_base_url=failed_base_url, failure_scope=failure_scope)
     tried = []
-    for label, try_fn in _get_provider_chain():
+    for label, try_fn in _get_provider_chain(openrouter_requested=failed_provider or "auto"):
         candidate_base_url = _custom_health_base_url(label)
         if (not failed_base_url and label in skip_chain_labels) or skip_backend(
                 label, None, candidate_base_url):
@@ -4200,10 +4229,14 @@ def _try_main_provider_route(
     return client, resolved or main_model, resolved_provider
 
 
-def _try_discovery_chain() -> Tuple[Optional[OpenAI], Optional[str], str]:
-    """Step 3: hardcoded aggregator/fallback chain, skipping unhealthy providers."""
+def _try_discovery_chain(requested: str = "auto") -> Tuple[Optional[OpenAI], Optional[str], str]:
+    """Step 3: hardcoded aggregator/fallback chain, skipping unhealthy providers.
+
+    ``requested`` is the main/failed provider identity so OpenRouter cannot spend the
+    company wallet on a named-vendor hop.
+    """
     tried = []
-    for label, try_fn in _get_provider_chain():
+    for label, try_fn in _get_provider_chain(openrouter_requested=requested or "auto"):
         candidate_base_url = _custom_health_base_url(label)
         if _is_provider_unhealthy(label, candidate_base_url):
             _log_skip_unhealthy(label, base_url=candidate_base_url)
@@ -4249,7 +4282,7 @@ def _resolve_auto_route(
         task, main_provider or "auto", reason="main provider unavailable")
     if fb_client is not None:
         return fb_client, fb_model, fb_label
-    return _try_discovery_chain()
+    return _try_discovery_chain(requested=main_provider or "auto")
 
 
 def _effective_provider_for_client(client: Any, fallback: str) -> str:
@@ -5102,10 +5135,17 @@ def _vision_auto_route(
         if client is not None:
             return _finalize_vision_client(main_provider, client, default_model, resolved_model, async_mode)
     # Aggregators use their dedicated vision model, not the user's main model.
+    # OpenRouter is wallet-bound: a named-vendor main session cannot spend the company
+    # OpenRouter key on vision auto-detect.
     for candidate in _VISION_AUTO_PROVIDER_ORDER:
         if candidate == main_provider:
             continue  # already tried above
-        sync_client, default_model = _resolve_strict_vision_backend(candidate)
+        if candidate == "openrouter":
+            sync_client, default_model = _try_openrouter(
+                model=resolved_model, requested=main_provider or "auto",
+            )
+        else:
+            sync_client, default_model = _resolve_strict_vision_backend(candidate)
         if sync_client is not None:
             return _finalize_vision_client(candidate, sync_client, default_model, resolved_model, async_mode)
     logger.debug("Auxiliary vision client: none available")
