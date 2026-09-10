@@ -350,7 +350,17 @@ class TestResolutionOrder:
             lambda name: "sk-x" if name == "EXA_API_KEY" else "",
         )
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
-        assert web_tools._get_backend() != "exa"
+        monkeypatch.setattr(
+            web_tools, "_registered_web_provider",
+            lambda name: {"parallel": ParallelWebSearchProvider(),
+                          "exa": ExaWebSearchProvider()}.get(name),
+        )
+        monkeypatch.setattr(web_tools, "_list_registered_web_providers", list)
+        from agent.web_search_registry import _keyless_preference
+        expected = next(
+            v for v in _keyless_preference() if v in ("exa", "parallel")
+        )
+        assert web_tools._get_backend() == expected
 
     def test_get_backend_keyless_disabled(self, monkeypatch):
         monkeypatch.setattr(
