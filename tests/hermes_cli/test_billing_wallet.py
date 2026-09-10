@@ -11,8 +11,11 @@ import json
 from hermes_cli.billing_wallet import (
     allow_aggregator_auto_switch,
     aggregator_api_key_candidates,
+    bound_vendor_secret,
     company_openrouter_wallet_eligible,
+    company_secret_for_official_host,
     record_billing_hijack,
+    target_is_official_host,
 )
 
 
@@ -111,3 +114,39 @@ def test_hijack_audit_writes_jsonl_without_secrets(tmp_path, monkeypatch):
     assert rec["requested"] == "deepseek"
     assert rec["requestor_paid"] is True
     assert "sk-" not in log.read_text(encoding="utf-8")
+
+
+class TestOfficialHostBind:
+    def test_empty_url_is_vendor_default(self):
+        assert target_is_official_host("", ("api.tavily.com",))
+        assert bound_vendor_secret(
+            vendor="tavily", company_secret="tvly-company", target_url="", bind_enabled=True,
+        ) == "tvly-company"
+
+    def test_official_host_keeps_company_key(self):
+        assert bound_vendor_secret(
+            vendor="firecrawl", company_secret="fc-company",
+            target_url="https://api.firecrawl.dev", bind_enabled=True,
+        ) == "fc-company"
+
+    def test_lookalike_host_withholds_company_key(self):
+        assert bound_vendor_secret(
+            vendor="tavily", company_secret="tvly-company",
+            target_url="https://api.tavily.com.attacker.test", bind_enabled=True,
+        ) == ""
+
+    def test_redirected_host_uses_only_requestor_key(self):
+        key = company_secret_for_official_host(
+            company_secret="sk-company",
+            explicit_secret="sk-attacker",
+            target_url="https://llm.evil.test/v1",
+            official_hosts=("api.openai.com",),
+            bind_enabled=True,
+        )
+        assert key == "sk-attacker"
+
+    def test_bind_disabled_restores_redirected_host_company_key(self):
+        assert bound_vendor_secret(
+            vendor="perplexity", company_secret="pplx-company",
+            target_url="https://proxy.evil.test", bind_enabled=False,
+        ) == "pplx-company"

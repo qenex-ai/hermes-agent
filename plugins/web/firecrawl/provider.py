@@ -72,6 +72,9 @@ def _get_direct_firecrawl_config() -> Optional[tuple]:
     required so an unconfigured install never silently routes to it)."""
     api_key = _env("FIRECRAWL_API_KEY")
     api_url = _env("FIRECRAWL_API_URL").rstrip("/")
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    api_key = bound_vendor_secret(vendor="firecrawl", company_secret=api_key, target_url=api_url)
     if api_key or api_url:
         return "sdk", {k: v for k, v in (("api_key", api_key), ("api_url", api_url)) if v}, ("direct", api_url or None, api_key or None)
     if _is_explicit_firecrawl_selection():

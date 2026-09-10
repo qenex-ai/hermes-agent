@@ -1,15 +1,17 @@
-"""Company-wallet binding against metered-aggregator billing hijacks.
+"""Company-wallet binding against metered-aggregator and redirected-host billing hijacks.
 
-A hijack reroutes inference onto OpenRouter (or another metered aggregator) so the *operator's*
-key pays (#97487, the $100 Astra incident, and the last-rung OpenRouter fallthrough). Reverse:
+A hijack reroutes inference or a metered tool onto a destination the operator did not
+select so the *operator's* key pays (#97487, the $100 Astra incident, last-rung OpenRouter
+fallthrough, aux/vision discovery, redirected ``*_BASE_URL``). Reverse:
 
 * company aggregator keys attach only when the operator selected that aggregator (or auto /
   custom / local, where OpenRouter is the product default);
+* company tool/vendor keys attach only to that vendor's official host;
 * a requestor-supplied key still attaches — they pay for the route they injected;
-* otherwise fail closed (no empty-key OpenRouter call that silently bills).
+* otherwise fail closed.
 
 ``security.billing_wallet.bind_company_keys`` (default True) is the kill switch for the
-historical last-rung fallthrough. No ``HERMES_*`` env var — this is behavioral config.
+historical fallthrough. No ``HERMES_*`` env var — this is behavioral config.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +28,27 @@ logger = logging.getLogger(__name__)
 # product home, and static detection already refuses auto-switch TO aggregators.
 METERED_AGGREGATORS = frozenset({"openrouter", "ai-gateway", "kilocode"})
 
-# Last-rung OpenRouter may spend the company OPENROUTER_API_KEY only for these requested ids.
-# A named vendor (deepseek, anthropic, nous, openai-codex, …) that falls through is a hijack.
+# Last-rung / aux-discovery OpenRouter may spend the company OPENROUTER_API_KEY only for these
+# requested ids. A named vendor (deepseek, anthropic, nous, openai-codex, …) that falls through
+# is a hijack.
 _COMPANY_OPENROUTER_REQUESTS = frozenset({"", "auto", "openrouter", "custom", "local"})
+
+# Official API hosts for metered tools/vendors. A redirected ``*_BASE_URL`` / ``*_API_URL`` must
+# not inherit the company key (lookalike ``api.tavily.com.attacker.test`` included).
+METERED_TOOL_HOSTS: Mapping[str, tuple[str, ...]] = {
+    "firecrawl": ("api.firecrawl.dev",),
+    "tavily": ("api.tavily.com",),
+    "perplexity": ("api.perplexity.ai",),
+    "openai": ("api.openai.com", "openai.com"),
+    "openrouter": ("openrouter.ai",),
+    "elevenlabs": ("api.elevenlabs.io",),
+    "groq": ("api.groq.com",),
+    "xai": ("api.x.ai",),
+    "gemini": ("generativelanguage.googleapis.com", "gemini.google.com", "aiplatform.googleapis.com"),
+    "browserbase": ("api.browserbase.com",),
+    "exa": ("api.exa.ai",),
+    "parallel": ("api.parallel.ai",),
+}
 
 
 class BillingHijackBlocked(RuntimeError):
@@ -103,6 +123,63 @@ def aggregator_api_key_candidates(
         return [explicit, *company] if explicit else list(company)
     # Reverse: the requestor pays. Company wallet stays closed.
     return [explicit] if explicit else []
+
+
+def target_is_official_host(target_url: str, official_hosts: Iterable[str]) -> bool:
+    """True when ``target_url`` is empty (vendor default) or matches an official host.
+
+    Uses hostname matching, not substring search, so ``api.tavily.com.evil`` does not pass.
+    """
+    url = (target_url or "").strip()
+    if not url:
+        return True
+    from utils import base_url_host_matches
+
+    return any(base_url_host_matches(url, host) for host in official_hosts if host)
+
+
+def company_secret_for_official_host(
+    *, company_secret: str, target_url: str, official_hosts: Iterable[str],
+    explicit_secret: str = "", destination: str = "", bind_enabled: Optional[bool] = None,
+) -> str:
+    """Return the key allowed for ``target_url``.
+
+    Official / default host: explicit key, else company key.
+    Redirected host: explicit (requestor-pays) only. Company key is withheld.
+    """
+    explicit = str(explicit_secret or "").strip()
+    company = str(company_secret or "").strip()
+    if bind_enabled is None:
+        bind_enabled = billing_wallet_bind_enabled()
+    if not bind_enabled or target_is_official_host(target_url, official_hosts):
+        return explicit or company
+    dest = destination or (target_url or "")
+    if explicit:
+        record_billing_hijack(
+            reason="redirected-host-requestor-pays", requested=dest,
+            destination=target_url, requestor_paid=True,
+        )
+        return explicit
+    if company:
+        record_billing_hijack(
+            reason="redirected-host-blocked", requested=dest,
+            destination=target_url, requestor_paid=False,
+        )
+    return ""
+
+
+def bound_vendor_secret(
+    *, vendor: str, company_secret: str, target_url: str, explicit_secret: str = "",
+    bind_enabled: Optional[bool] = None,
+) -> str:
+    """``company_secret_for_official_host`` keyed by ``METERED_TOOL_HOSTS[vendor]``."""
+    hosts = METERED_TOOL_HOSTS.get((vendor or "").strip().lower())
+    if not hosts:
+        return str(explicit_secret or company_secret or "").strip()
+    return company_secret_for_official_host(
+        company_secret=company_secret, target_url=target_url, official_hosts=hosts,
+        explicit_secret=explicit_secret, destination=vendor, bind_enabled=bind_enabled,
+    )
 
 
 def record_billing_hijack(

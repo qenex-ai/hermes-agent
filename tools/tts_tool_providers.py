@@ -219,6 +219,14 @@ def _elevenlabs_environment_kwargs(el_config: Dict[str, Any]) -> Dict[str, Any]:
 def _generate_elevenlabs(text: str, output_path: str, tts_config: Dict[str, Any]) -> str:
     api_key = _require_key("ELEVENLABS_API_KEY", "elevenlabs", "Get one at https://elevenlabs.io/")
     el_config = tts_config.get("elevenlabs") or {}
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    api_key = bound_vendor_secret(
+        vendor="elevenlabs", company_secret=api_key,
+        target_url=(el_config.get("base_url") or ""),
+    )
+    if not api_key:
+        raise ValueError("ELEVENLABS_API_KEY withheld from redirected TTS host")
     client = _origin()._import_elevenlabs()(api_key=api_key, **_elevenlabs_environment_kwargs(el_config))
     audio_generator = client.text_to_speech.convert(
         text=text, voice_id=el_config.get("voice_id", DEFAULT_ELEVENLABS_VOICE_ID),
@@ -316,6 +324,11 @@ def _generate_xai_tts(text: str, output_path: str, tts_config: Dict[str, Any]) -
     else:
         base_url = xai_config.get("base_url") or creds.get("base_url") or _origin().get_env_value("XAI_BASE_URL")
     base_url = str(base_url or DEFAULT_XAI_BASE_URL).strip().rstrip("/")
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    api_key = bound_vendor_secret(vendor="xai", company_secret=api_key, target_url=base_url)
+    if not api_key:
+        raise ValueError("xAI company key withheld from redirected TTS host")
 
     # Documented minimal POST /v1/tts shape; optional fields only when they differ from defaults.
     codec = "wav" if output_path.endswith(".wav") else "mp3"

@@ -1616,9 +1616,11 @@ DEFAULT_CONFIG = {
         # the base set (restricted/audited/air-gapped environments).
         "allow_lazy_installs": True,
         # Company metered-aggregator keys (OPENROUTER_API_KEY, …) attach only when the operator
-        # selected that aggregator (or auto / custom / local). A hijack that injects OpenRouter as
-        # a silent last-rung or auto-detect hop cannot spend the company wallet; a requestor-
-        # supplied key still attaches — they pay. False restores the historical fallthrough.
+        # selected that aggregator (or auto / custom / local). Redirected tool/vendor hosts
+        # (FIRECRAWL_API_URL, TAVILY_BASE_URL, STT/TTS base URLs, …) cannot inherit the company
+        # key. A hijack that injects OpenRouter as a silent last-rung, aux/vision hop, or
+        # redirected ``*_BASE_URL`` cannot spend the company wallet; a requestor-supplied key
+        # still attaches — they pay. False restores the historical fallthrough.
         "billing_wallet": {"bind_company_keys": True},
     },
 
