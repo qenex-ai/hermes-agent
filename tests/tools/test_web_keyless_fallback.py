@@ -198,6 +198,10 @@ class TestProviderRouting:
             "agent.web_search_provider.get_provider_env",
             lambda name: "sk-real" if name == "PARALLEL_API_KEY" else "",
         )
+        monkeypatch.setattr(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name == "parallel",
+        )
         provider = ParallelWebSearchProvider()
         with patch.object(keyless_mcp, "parallel_search_keyless") as keyless, \
                 patch("plugins.web.parallel.provider._get_sync_client") as client:

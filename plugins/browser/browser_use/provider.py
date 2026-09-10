@@ -92,7 +92,8 @@ class BrowserUseBrowserProvider(CloudBrowserProvider):
         selected = read_selection("browser")
         from hermes_cli.billing_wallet import bound_vendor_secret
 
-        direct_url = (get_secret("BROWSER_USE_API_URL") or _BASE_URL)
+        raw_url = (get_secret("BROWSER_USE_API_URL") or "").strip()
+        direct_url = raw_url if "://" in raw_url else _BASE_URL
         api_key = bound_vendor_secret(
             vendor="browser-use", company_secret=api_key or "", target_url=direct_url,
         )
