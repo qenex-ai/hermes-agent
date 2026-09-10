@@ -425,13 +425,8 @@ def _normalize_main_model_assignment(provider: str, model: str) -> tuple[str, st
         if cur_provider and normalize_provider(cur_provider) in _AGGREGATOR_PROVIDERS:
             canonical = normalize_provider(cur_provider)
             prov_in = cur_provider
-        else:
-            from hermes_cli.models_detect import provider_has_credentials
-
-            # Only guess OpenRouter when the user actually holds a key for it; otherwise keep the
-            # pair as sent rather than persisting a provider they never selected.
-            if provider_has_credentials("openrouter"):
-                canonical = prov_in = "openrouter"
+        # else: keep the pair as sent. Holding OPENROUTER_API_KEY is not consent to persist
+        # OpenRouter as the configured provider (billing-wallet bind).
 
     if canonical in _KNOWN_PROVIDER_NAMES and not canonical.startswith("custom"):
         try:
@@ -754,9 +749,8 @@ def _infer_provider_on_model_change(model_val: str, prev_provider: str) -> tuple
 
     Returns ``(provider, model)``; ``provider`` is empty when no switch is warranted. Signals,
     in order: curated-catalog detection (``detect_provider_for_model``), then the vendor-slug
-    heuristic — a ``vendor/model`` slug cannot belong to a non-aggregator provider (e.g.
-    ``ollama-local``), so return the sentinel ``"openrouter"``; the caller's
-    ``_normalize_main_model_assignment`` resolves the real aggregator (keeps the current one).
+    heuristic — a ``vendor/model`` slug on the current aggregator stays on that aggregator;
+    a native provider is not rewritten to OpenRouter just because a key exists.
     """
     name = (model_val or "").strip()
     if not name:
@@ -775,13 +769,11 @@ def _infer_provider_on_model_change(model_val: str, prev_provider: str) -> tuple
 
     if "/" in name:
         try:
-            from hermes_cli.models_detect import provider_has_credentials
-
             cur_is_aggregator = normalize_provider(prev_provider) in _AGGREGATOR_PROVIDERS
-            # A vendor slug on a native provider is a guess at an aggregator; never guess one the
-            # user has no key for — that silently writes a metered provider into config.yaml.
-            if not cur_is_aggregator and provider_has_credentials("openrouter"):
-                return "openrouter", name
+            # Vendor slug on an aggregator: keep that aggregator. On a native provider, do not
+            # guess OpenRouter just because a key exists — that persisted a metered hop.
+            if cur_is_aggregator:
+                return prev_provider, name
         except Exception:
             pass
     return "", name

@@ -145,11 +145,35 @@ def _resolve_openrouter_runtime(
         and base_url == (env_openrouter_base_url or "").rstrip("/")
     )
     if is_openrouter_context:
-        candidates = [explicit_api_key, rp._getenv("OPENROUTER_API_KEY"), rp._getenv("OPENAI_API_KEY")]
+        from hermes_cli.billing_wallet import (
+            aggregator_api_key_candidates, company_openrouter_wallet_eligible, record_billing_hijack,
+        )
+
+        company_keys = [rp._getenv("OPENROUTER_API_KEY"), rp._getenv("OPENAI_API_KEY")]
+        eligible = company_openrouter_wallet_eligible(requested=requested_norm)
+        candidates = aggregator_api_key_candidates(
+            requested=requested_norm, explicit_api_key=explicit_api_key, company_keys=company_keys,
+        )
+        if not eligible:
+            requestor_paid = bool(str(explicit_api_key or "").strip())
+            record_billing_hijack(
+                reason="openrouter-last-rung" if requestor_paid else "openrouter-last-rung-blocked",
+                requested=requested_norm or requested_provider,
+                destination=base_url,
+                requestor_paid=requestor_paid,
+            )
     else:
         candidates = [explicit_api_key, (cfg_api_key if use_config_base_url else ""),
                       *rp._host_gated_env_key_candidates(base_url, ollama=True)]
     api_key = next((str(c or "").strip() for c in candidates if rp.has_usable_secret(c)), "")
+    if is_openrouter_context and not api_key:
+        raise rp.AuthError(
+            "Billing hijack blocked: OpenRouter was not selected for this request, so the "
+            "company OpenRouter wallet is closed. Supply your own OpenRouter key to pay for "
+            "this route, or set provider to openrouter / auto.",
+            provider="openrouter",
+            code="billing_hijack_blocked",
+        )
     source = "explicit" if (explicit_api_key or explicit_base_url) else "env/config"
     cfg_api_mode = rp._parse_api_mode(model_cfg.get("api_mode"))
     # Explicit "custom" stays "custom" rather than relabeling to "openrouter".

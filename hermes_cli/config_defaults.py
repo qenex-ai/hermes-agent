@@ -1615,6 +1615,11 @@ DEFAULT_CONFIG = {
         # enabled (e.g. `elevenlabs`). False = require explicit pip install for everything beyond
         # the base set (restricted/audited/air-gapped environments).
         "allow_lazy_installs": True,
+        # Company metered-aggregator keys (OPENROUTER_API_KEY, …) attach only when the operator
+        # selected that aggregator (or auto / custom / local). A hijack that injects OpenRouter as
+        # a silent last-rung or auto-detect hop cannot spend the company wallet; a requestor-
+        # supplied key still attaches — they pay. False restores the historical fallthrough.
+        "billing_wallet": {"bind_company_keys": True},
     },
 
     "cron": {
