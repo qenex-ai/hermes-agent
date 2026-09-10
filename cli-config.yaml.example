@@ -511,6 +511,10 @@ terminal:
 #   approval:
 #     transport: builtin        # Or an explicitly enabled plugin transport name
 #     transport_fallback: deny  # Set builtin to opt into fallback on transport failure
+#   billing_wallet:
+#     bind_company_keys: true   # Company OpenRouter/AI-Gateway keys never attach to a
+#                               # hijacked last-rung / auto-detect hop. The requestor
+#                               # pays with their own key, or the call fails closed.
 
 # =============================================================================
 # Browser Tool Configuration
