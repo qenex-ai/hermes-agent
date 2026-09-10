@@ -389,6 +389,48 @@ def test_update_still_skips_dirty_parked_when_auto_switch_disabled(
     assert _git(repo_pair, "stash", "list").stdout.strip() == ""
 
 
+def test_update_dirty_parked_stash_survives_discard_config(
+    repo_pair, monkeypatch, capsys
+):
+    """updates.non_interactive_local_changes: discard is for local edits on
+    the update target. Feature-branch WIP must stay parked in the stash."""
+    import hermes_cli.config as hermes_config
+
+    monkeypatch.setattr(
+        hermes_config,
+        "load_config",
+        lambda: {"updates": {"non_interactive_local_changes": "discard"}},
+    )
+    (repo_pair / "a.txt").write_text("local edit\n")
+    _patch_update_flow(monkeypatch, repo_pair)
+
+    class _StopFlow(Exception):
+        pass
+
+    monkeypatch.setattr(
+        hermes_main,
+        "_abort_dependency_sync_if_self_locked",
+        lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
+    )
+    args = SimpleNamespace(
+        branch=None, yes=True, force=False, force_venv=False,
+    )
+
+    with pytest.raises(_StopFlow):
+        hermes_main.cmd_update(args)
+
+    out = capsys.readouterr().out
+    assert "CODE UPDATE SKIPPED" not in out
+    assert "Discarded local source changes" not in out
+    assert (
+        _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        == "main"
+    )
+    assert (repo_pair / "a.txt").read_text() == "two\n"
+    assert "hermes-update-autostash-" in _git(repo_pair, "stash", "list").stdout
+    assert "local edit" in _git(repo_pair, "stash", "show", "-p").stdout
+
+
 def test_update_switches_unmerged_parked_branch_with_kept_notice(
     repo_pair, monkeypatch, capsys
 ):
