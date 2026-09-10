@@ -852,7 +852,7 @@ This starts a stdio MCP server. The MCP client (not you) manages the process lif
 
 Add Hermes to your MCP client config.
 
-**Cursor IDE** uses Hermes as MCP tools, not as an ACP agent. This checkout ships [`.cursor/mcp.json`](https://github.com/qenex-ai/hermes-agent/blob/main/.cursor/mcp.json) (`hermes` stdio + `qenex` HTTP + project-scoped `supabase` HTTP). See [Use Hermes MCP in Cursor IDE](/guides/cursor-mcp) for the MCP vs ACP decision, the QENEX OAuth/`/mcp` path note, and the venv fallback.
+**Cursor IDE** uses Hermes as MCP tools, not as an ACP agent. This checkout ships [`.cursor/mcp.json`](https://github.com/qenex-ai/hermes-agent/blob/main/.cursor/mcp.json) (`hermes` stdio + `qenex` HTTP + project-scoped `supabase` HTTP + Pipedrive HTTP). See [Use Hermes MCP in Cursor IDE](/guides/cursor-mcp) for the MCP vs ACP decision, the QENEX OAuth/`/mcp` path note, Pipedrive’s `/mcp` URL, and the venv fallback.
 
 Claude Code (`~/.claude/claude_desktop_config.json`) or any other stdio MCP client:
 

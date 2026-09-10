@@ -73,12 +73,31 @@ Project-scoped mode disables account-management tools even if `account` is liste
 
 Vendor agent skills: `npx skills add supabase/agent-skills -a cursor -y` installs `supabase` and `supabase-postgres-best-practices` into `.agents/skills/` (pinned by `skills-lock.json`).
 
+### `pipedrive` (HTTP MCP)
+
+```json
+"pipedrive": {
+  "url": "https://mcp.pipedrive.ai/mcp"
+}
+```
+
+Official Pipedrive CRM MCP. Cursor prompts for **OAuth** on first connect. Tools inherit your Pipedrive role and visibility. Do not put API tokens in the project file.
+
+**Path check (ops):** a live probe of `mcp.pipedrive.ai` (2026-09-10) found:
+
+- `POST https://mcp.pipedrive.ai/mcp` → `401` with `WWW-Authenticate: Bearer` (MCP endpoint present; auth required). OAuth `resource` is `https://mcp.pipedrive.ai/mcp`
+- `POST https://mcp.pipedrive.ai/` and `POST https://mcp.pipedrive.ai/sse` → `301` to `pipedrive.com` (not MCP)
+
+The committed URL is therefore **`https://mcp.pipedrive.ai/mcp`**, matching the OAuth resource metadata. Hermes-as-client: `hermes mcp` → install catalog entry `pipedrive`.
+
+**Claude.ai / Claude Desktop:** [Pipedrive MCP for Claude](https://support.pipedrive.com/en/article/mcp-claude) — Customize → Connectors → Add custom connector, name `Pipedrive MCP BETA`, connection `https://mcp.pipedrive.ai/mcp`. Enable “load all available tools” in the connector if Claude truncates the tool list. ChatGPT: [Pipedrive MCP for ChatGPT](https://support.pipedrive.com/en/article/mcp-chatgpt).
+
 ## Enable in Cursor
 
 1. Install Hermes so `hermes` is on your shell PATH (`hermes doctor` should work).
 2. Open this repo in Cursor. Project MCP servers load from `.cursor/mcp.json`.
-3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, and `supabase`. Approve QENEX and Supabase OAuth if prompted.
-4. Confirm `hermes` tools such as `conversations_list` / `messages_send` appear — not the Hermes ACP session UI. Confirm Supabase tools such as `list_tables` / `execute_sql` appear for project `tmsvyuxaiozmcxdaaqeu`.
+3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, `supabase`, and `pipedrive`. Approve QENEX, Supabase, and Pipedrive OAuth if prompted.
+4. Confirm `hermes` tools such as `conversations_list` / `messages_send` appear — not the Hermes ACP session UI. Confirm Supabase tools such as `list_tables` / `execute_sql` appear for project `tmsvyuxaiozmcxdaaqeu`. Confirm Pipedrive deal/contact tools appear after OAuth.
 
 User-level Cursor MCP config (`~/.cursor/mcp.json`) is fine for personal servers; keep fork defaults in the project file so the checkout is self-describing.
 
