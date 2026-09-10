@@ -390,6 +390,9 @@ class TestParallelClientConfig:
             lambda name: name == "parallel",
         )
         self._select.start()
+        # sys.modules already holds the fake SDK; skip the lazy-install probe.
+        self._lazy = patch("plugins.web._common.lazy_ensure", lambda feature: None)
+        self._lazy.start()
 
     def teardown_method(self):
         import tools.web_tools
@@ -397,6 +400,7 @@ class TestParallelClientConfig:
         os.environ.pop("PARALLEL_API_KEY", None)
         sys.modules.pop("parallel", None)
         self._select.stop()
+        self._lazy.stop()
 
     def test_creates_client_with_key(self):
         """PARALLEL_API_KEY set → creates Parallel client."""
@@ -829,6 +833,9 @@ class TestSiblingProvidersEnvResolution:
             "hermes_cli.config.get_env_value",
             side_effect=lambda k: "kn-from-dotenv" if k == "KEENABLE_API_KEY" else None,
         ), patch(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name == "keenable",
+        ), patch(
             "requests.post", return_value=mock_response
         ) as mock_post:
             from plugins.web.keenable.provider import KeenableWebSearchProvider
@@ -849,6 +856,9 @@ class TestSiblingProvidersEnvResolution:
         with patch(
             "hermes_cli.config.get_env_value",
             side_effect=lambda k: "tvly-from-dotenv" if k == "TAVILY_API_KEY" else None,
+        ), patch(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name == "tavily",
         ), patch(
             "plugins.web.tavily.provider.httpx.post", return_value=mock_response
         ) as mock_post:

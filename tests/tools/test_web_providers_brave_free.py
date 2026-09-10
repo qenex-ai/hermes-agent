@@ -39,6 +39,14 @@ class TestBraveFreeProviderIsConfigured:
 
 
 class TestBraveFreeProviderSearch:
+    @pytest.fixture(autouse=True)
+    def _operator_selected_brave(self, monkeypatch):
+        """These tests drive Brave.search() as if ``hermes tools`` picked it."""
+        monkeypatch.setattr(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name in {"brave-free", "brave"},
+        )
+
     _SAMPLE_RESPONSE = {
         "web": {
             "results": [
