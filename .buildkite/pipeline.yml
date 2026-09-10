@@ -1,0 +1,149 @@
+# Hermes Agent — Buildkite pipeline
+#
+# Paste this file into the pipeline's YAML Steps editor (the Hello world
+# template). Use YAML steps, not "Steps from repository", until the Buildkite
+# GitHub App can list files — that picker is what shows
+# "Buildkite couldn't scan this repository".
+#
+# After the App is installed on this GitHub org with Contents: Read, switch
+# the pipeline to "Use steps from repository" → `.buildkite/pipeline.yml`.
+#
+# Agents: Linux with curl, python3, and enough CPU/RAM for pytest. GitHub's
+# pytest lane uses 96 cores; here `scripts/run_tests.sh` sizes workers from
+# nproc. To pin a queue, add under a step:
+#   agents:
+#     queue: "linux-large"
+#
+# This file is the fail-open (every Linux lane) dump. On Buildkite, prefer
+#   python3 scripts/ci/buildkite_pipeline.py | buildkite-agent pipeline upload
+# so PRs skip lanes the change classifier would skip.
+
+env:
+  OPENROUTER_API_KEY: ''
+  OPENAI_API_KEY: ''
+  NOUS_API_KEY: ''
+  UV_VERSION: 0.9.28
+  PYTHON_VERSION: '3.11'
+steps:
+- group: ':zap: Always-on guards'
+  key: guards
+  steps:
+  - label: ':file_folder: Case collisions'
+    key: case-collisions
+    command: |
+      set -euo pipefail
+      python3 scripts/check-case-collisions.py
+    timeout_in_minutes: 5
+    retry: &id001
+      automatic:
+      - exit_status: -1
+        limit: 2
+  - label: ':frame_with_picture: Infographic check'
+    key: infographic
+    command: |
+      set -euo pipefail
+      OFFENDERS=$(git ls-files -z | tr '\0' '\n' | grep -iE '(^|/)(infograph|infograf)[^/]*/' | grep -iE '\.(png|jpe?g|webp|gif)$' || true)
+      if [ -n "$$OFFENDERS" ]; then
+        echo "PR-infographic image(s) are tracked in git:"
+        printf '%s\n' "$$OFFENDERS"
+        echo "Infographic images belong in the PR description, never in git."
+        exit 1
+      fi
+      echo "No committed PR-infographic images."
+    timeout_in_minutes: 10
+    retry: *id001
+  - label: ':package: Profile artifact check'
+    key: profile-artifacts
+    command: |
+      set -euo pipefail
+      python3 scripts/ci/check_profile_archive_boundary.py
+    timeout_in_minutes: 5
+    retry: *id001
+- group: ':python: Python'
+  key: python
+  steps:
+  - label: ':ruff: ruff check'
+    key: ruff
+    command: |
+      set -euo pipefail
+      curl -LsSf "https://astral.sh/uv/0.9.28/install.sh" | sh
+      export PATH="$$HOME/.local/bin:$$PATH"
+      uv tool install ruff
+      ruff check .
+    timeout_in_minutes: 5
+    retry: *id001
+  - label: ':warning: Windows footguns + compat pointers'
+    key: footguns
+    command: |
+      set -euo pipefail
+      curl -LsSf "https://astral.sh/uv/0.9.28/install.sh" | sh
+      export PATH="$$HOME/.local/bin:$$PATH"
+      uv python install 3.11
+      uv run --python 3.11 --no-project python scripts/check-windows-footguns.py --all
+      uv run --python 3.11 --no-project python scripts/check_compat_pointers.py
+    timeout_in_minutes: 5
+    retry: *id001
+  - label: ':pytest: Linux tests'
+    key: pytest
+    command: |
+      set -euo pipefail
+      curl -LsSf "https://astral.sh/uv/0.9.28/install.sh" | sh
+      export PATH="$$HOME/.local/bin:$$PATH"
+      if ! command -v rg >/dev/null 2>&1; then
+        RG_TARBALL="ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz"
+        curl -sSfL --retry 3 --retry-delay 5 -o "$$RG_TARBALL" \
+          "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/$$RG_TARBALL"
+        echo "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599  $$RG_TARBALL" | sha256sum -c -
+        tar -xzf "$$RG_TARBALL"
+        if command -v sudo >/dev/null 2>&1; then
+          sudo mv "ripgrep-15.1.0-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
+        else
+          mkdir -p "$$HOME/.local/bin"
+          mv "ripgrep-15.1.0-x86_64-unknown-linux-musl/rg" "$$HOME/.local/bin/rg"
+          export PATH="$$HOME/.local/bin:$$PATH"
+        fi
+        rm -rf "$$RG_TARBALL" "ripgrep-15.1.0-x86_64-unknown-linux-musl"
+      fi
+      rg --version
+      uv python install 3.11
+      uv sync --locked --python 3.11 --extra all --extra dev --extra anthropic --extra mistral --extra fal --extra modal --extra daytona --extra hindsight --extra parallel-web
+      source .venv/bin/activate
+      scripts/run_tests.sh
+    timeout_in_minutes: 60
+    retry: *id001
+    env:
+      OPENROUTER_API_KEY: ''
+      OPENAI_API_KEY: ''
+      NOUS_API_KEY: ''
+- group: ':lock: Lockfile'
+  key: lockfile
+  steps:
+  - label: ':lock: uv.lock check'
+    key: uv-lock
+    command: |
+      set -euo pipefail
+      curl -LsSf "https://astral.sh/uv/0.9.28/install.sh" | sh
+      export PATH="$$HOME/.local/bin:$$PATH"
+      uv python install 3.11
+      uv lock --check --python 3.11
+    timeout_in_minutes: 5
+    retry: *id001
+- group: ':node: Frontend'
+  key: frontend
+  steps:
+  - label: ':node: JS & TS checks'
+    key: js-checks
+    command: |
+      set -euo pipefail
+      export NVM_DIR="$$HOME/.nvm"
+      if [ ! -s "$$NVM_DIR/nvm.sh" ]; then
+        curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh" | bash
+      fi
+      . "$$NVM_DIR/nvm.sh"
+      nvm install 26
+      nvm use 26
+      npm --version | grep -q '^12\.' || npm i -g npm@12
+      npm ci
+      node .github/scripts/run-workspace-checks.mjs
+    timeout_in_minutes: 30
+    retry: *id001
