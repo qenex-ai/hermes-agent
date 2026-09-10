@@ -167,7 +167,13 @@ class Mem0MemoryProvider(MemoryProvider):
             from . import _backend
             if self._mode == "oss":
                 return _backend.OSSBackend(self._config.get("oss", {}))
-            return _backend.SelfHostedBackend(self._api_key, self._host) if self._host else _backend.PlatformBackend(self._api_key)
+            from hermes_cli.billing_wallet import bound_vendor_secret
+            if self._host:
+                api_key = bound_vendor_secret(
+                    vendor="mem0", company_secret=self._api_key or "", target_url=self._host,
+                )
+                return _backend.SelfHostedBackend(api_key, self._host)
+            return _backend.PlatformBackend(self._api_key)
         except Exception as e:
             logger.error("Mem0 backend failed to initialize (%s mode): %s", self._mode, e)
             self._init_error = str(e)

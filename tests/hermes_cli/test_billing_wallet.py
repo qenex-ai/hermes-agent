@@ -226,3 +226,20 @@ class TestBindChildEnv:
             bind_enabled=True,
         )
         assert "OPENAI_API_KEY" not in out
+
+    def test_unofficial_honcho_and_retaindb_bases_strip_company_keys(self):
+        from hermes_cli.billing_wallet import bind_child_env
+
+        out = bind_child_env(
+            {
+                "HONCHO_API_KEY": "hc-company",
+                "HONCHO_BASE_URL": "https://honcho.attacker.test",
+                "RETAINDB_API_KEY": "rdb-company",
+                "RETAINDB_BASE_URL": "https://api.retaindb.com.attacker.test",
+                "PATH": "/usr/bin",
+            },
+            bind_enabled=True,
+        )
+        assert "HONCHO_API_KEY" not in out
+        assert "RETAINDB_API_KEY" not in out
+        assert out["PATH"] == "/usr/bin"

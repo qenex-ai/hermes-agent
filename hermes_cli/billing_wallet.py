@@ -56,6 +56,11 @@ METERED_TOOL_HOSTS: Mapping[str, tuple[str, ...]] = {
     "krea": ("api.krea.ai",),
     "minimax": ("api.minimax.io", "api.minimaxi.com"),
     "mistral": ("api.mistral.ai",),
+    "honcho": ("api.honcho.dev", "app.honcho.dev"),
+    "supermemory": ("api.supermemory.ai",),
+    "retaindb": ("api.retaindb.com",),
+    "hindsight": ("api.hindsight.vectorize.io", "hindsight.vectorize.io"),
+    "mem0": ("api.mem0.ai", "app.mem0.ai"),
 }
 
 # Paid backends that must not be auto-selected just because the company key exists.
@@ -95,6 +100,12 @@ _CHILD_ENV_BINDINGS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = 
     (("KREA_API_KEY",), ("KREA_API_URL", "KREA_BASE_URL"), "krea"),
     (("MISTRAL_API_KEY",), ("MISTRAL_API_BASE", "MISTRAL_BASE_URL"), "mistral"),
     (("MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"), ("MINIMAX_BASE_URL", "MINIMAX_API_HOST"), "minimax"),
+    (("HONCHO_API_KEY",), ("HONCHO_BASE_URL", "HONCHO_URL"), "honcho"),
+    (("SUPERMEMORY_API_KEY",), ("SUPERMEMORY_BASE_URL",), "supermemory"),
+    (("RETAINDB_API_KEY",), ("RETAINDB_BASE_URL",), "retaindb"),
+    (("HINDSIGHT_API_KEY",), ("HINDSIGHT_API_URL",), "hindsight"),
+    (("HINDSIGHT_LLM_API_KEY", "HINDSIGHT_API_LLM_API_KEY"), ("HINDSIGHT_API_LLM_BASE_URL", "HINDSIGHT_LLM_BASE_URL"), "openai"),
+    (("MEM0_API_KEY",), ("MEM0_HOST",), "mem0"),
 )
 
 
@@ -220,9 +231,10 @@ def bound_vendor_secret(
     bind_enabled: Optional[bool] = None,
 ) -> str:
     """``company_secret_for_official_host`` keyed by ``METERED_TOOL_HOSTS[vendor]``."""
-    hosts = METERED_TOOL_HOSTS.get((vendor or "").strip().lower())
-    if not hosts:
+    vendor_l = (vendor or "").strip().lower()
+    if vendor_l not in METERED_TOOL_HOSTS:
         return str(explicit_secret or company_secret or "").strip()
+    hosts = METERED_TOOL_HOSTS[vendor_l]
     return company_secret_for_official_host(
         company_secret=company_secret, target_url=target_url, official_hosts=hosts,
         explicit_secret=explicit_secret, destination=vendor, bind_enabled=bind_enabled,
@@ -261,9 +273,9 @@ def bind_child_env(
     stripped: list[str] = []
     unofficial: list[str] = []
     for key_vars, url_vars, vendor in _CHILD_ENV_BINDINGS:
-        hosts = METERED_TOOL_HOSTS.get(vendor)
-        if not hosts:
+        if vendor not in METERED_TOOL_HOSTS:
             continue
+        hosts = METERED_TOOL_HOSTS[vendor]
         urls = [str(out.get(name) or "").strip() for name in url_vars]
         urls = [u for u in urls if u]
         if not urls:

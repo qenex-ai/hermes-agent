@@ -110,21 +110,42 @@ def _embedded_profile_env_path(config: dict[str, Any]) -> Path:
     return Path.home() / ".hindsight" / "profiles" / f"{profile}.env"
 
 
+_HINDSIGHT_LLM_VENDORS = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "gemini",
+    "groq": "groq",
+    "openrouter": "openrouter",
+    "minimax": "minimax",
+}
+
+
 def _embedded_llm_api_key(config: dict[str, Any]) -> str:
     return config.get("llmApiKey") or config.get("llm_api_key") or get_secret("HINDSIGHT_LLM_API_KEY", "")
 
 
 def _build_embedded_profile_env(config: dict[str, Any], *, llm_api_key: str | None = None) -> dict[str, str]:
     """Build the profile-scoped env that standalone hindsight-embed consumes."""
-    if llm_api_key is None:
-        llm_api_key = _embedded_llm_api_key(config)
+    explicit = ""
+    company = ""
+    if llm_api_key is not None:
+        explicit = str(llm_api_key or "")
+    else:
+        explicit = str(config.get("llmApiKey") or config.get("llm_api_key") or "").strip()
+        company = "" if explicit else (get_secret("HINDSIGHT_LLM_API_KEY", "") or "")
+    base_url = str(config.get("llm_base_url") or os.environ.get("HINDSIGHT_API_LLM_BASE_URL", "") or "")
+    provider = _daemon_llm_provider(config.get("llm_provider", ""))
+    vendor = _HINDSIGHT_LLM_VENDORS.get(provider, "openai")
+    from hermes_cli.billing_wallet import bound_vendor_secret
+    llm_api_key = bound_vendor_secret(
+        vendor=vendor, company_secret=company, explicit_secret=explicit, target_url=base_url,
+    )
     env_values = {
-        "HINDSIGHT_API_LLM_PROVIDER": str(_daemon_llm_provider(config.get("llm_provider", ""))),
+        "HINDSIGHT_API_LLM_PROVIDER": str(provider),
         "HINDSIGHT_API_LLM_API_KEY": str(llm_api_key or ""),
         "HINDSIGHT_API_LLM_MODEL": str(config.get("llm_model", "")),
         "HINDSIGHT_API_LOG_LEVEL": "info",
     }
-    base_url = config.get("llm_base_url") or os.environ.get("HINDSIGHT_API_LLM_BASE_URL", "")
     if base_url:
         env_values["HINDSIGHT_API_LLM_BASE_URL"] = str(base_url)
     if (idle_timeout := config.get("idle_timeout")) is None:

@@ -62,7 +62,8 @@ Do not add a surface-specific goal parser. ACP has no goal command or goal loop 
   (`agent/AGENTS.md`); `curator` = `enabled, interval_hours, min_idle_hours, stale_after_days,
   archive_after_days, backup.*`.   `security.billing_wallet.bind_company_keys` (default True) binds
   company OpenRouter/AI-Gateway keys so a last-rung / aux / vision auto-detect hijack cannot spend
-  them, withholds company tool/vendor keys from redirected ``*_BASE_URL`` hosts, refuses to
+  them, withholds company tool/vendor keys from redirected ``*_BASE_URL`` hosts (including memory
+  providers: Honcho, Supermemory, RetainDB, Hindsight, Mem0), refuses to
   auto-select a metered web/image/video/browser backend from key presence alone, and strips
   company keys from child-process env when the matching base URL is unofficial;
   `hermes_cli/billing_wallet.py` is the contract.
