@@ -515,8 +515,11 @@ terminal:
 #     bind_company_keys: true   # Company OpenRouter/AI-Gateway keys never attach to a
 #                               # hijacked last-rung, aux/vision auto-detect hop, or
 #                               # redirected tool host (FIRECRAWL_API_URL, TAVILY_BASE_URL,
-#                               # STT/TTS base URLs). The requestor pays with their own key,
-#                               # or the call fails closed.
+#                               # STT/TTS base URLs). Metered web/image/video/browser
+#                               # backends are not auto-selected from key presence — pick
+#                               # them in `hermes tools`. Child processes lose company keys
+#                               # when a matching *_BASE_URL is unofficial. The requestor
+#                               # pays with their own key, or the call fails closed.
 
 # =============================================================================
 # Browser Tool Configuration

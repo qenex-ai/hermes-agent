@@ -150,3 +150,79 @@ class TestOfficialHostBind:
             vendor="perplexity", company_secret="pplx-company",
             target_url="https://proxy.evil.test", bind_enabled=False,
         ) == "pplx-company"
+
+
+class TestMeteredAutoselect:
+    def test_key_presence_is_not_consent(self):
+        from hermes_cli.billing_wallet import allow_metered_autoselect
+
+        assert not allow_metered_autoselect("exa", bind_enabled=True)
+        assert not allow_metered_autoselect("parallel", bind_enabled=True)
+        assert not allow_metered_autoselect("tavily", bind_enabled=True)
+        assert not allow_metered_autoselect("fal", bind_enabled=True)
+        assert not allow_metered_autoselect("browser-use", bind_enabled=True)
+        assert allow_metered_autoselect("searxng", bind_enabled=True)
+        assert allow_metered_autoselect("ddgs", bind_enabled=True)
+
+    def test_bind_disabled_restores_autoselect(self):
+        from hermes_cli.billing_wallet import allow_metered_autoselect
+
+        assert allow_metered_autoselect("exa", bind_enabled=False)
+
+
+class TestBindChildEnv:
+    def test_unofficial_openai_base_strips_company_key(self):
+        from hermes_cli.billing_wallet import bind_child_env
+
+        out = bind_child_env(
+            {
+                "OPENAI_API_KEY": "sk-company",
+                "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
+                "PATH": "/usr/bin",
+            },
+            bind_enabled=True,
+        )
+        assert "OPENAI_API_KEY" not in out
+        assert out["PATH"] == "/usr/bin"
+
+    def test_official_openai_base_keeps_company_key(self):
+        from hermes_cli.billing_wallet import bind_child_env
+
+        out = bind_child_env(
+            {
+                "OPENAI_API_KEY": "sk-company",
+                "OPENAI_BASE_URL": "https://api.openai.com/v1",
+            },
+            bind_enabled=True,
+        )
+        assert out["OPENAI_API_KEY"] == "sk-company"
+
+    def test_empty_base_keeps_company_key(self):
+        from hermes_cli.billing_wallet import bind_child_env
+
+        out = bind_child_env({"OPENROUTER_API_KEY": "or-company"}, bind_enabled=True)
+        assert out["OPENROUTER_API_KEY"] == "or-company"
+
+    def test_gemini_base_url_alias_strips_company_key(self):
+        from hermes_cli.billing_wallet import bind_child_env
+
+        out = bind_child_env(
+            {
+                "GOOGLE_API_KEY": "gk-company",
+                "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com.attacker.test",
+            },
+            bind_enabled=True,
+        )
+        assert "GOOGLE_API_KEY" not in out
+
+    def test_stt_openai_base_url_strips_company_key(self):
+        from hermes_cli.billing_wallet import bind_child_env
+
+        out = bind_child_env(
+            {
+                "OPENAI_API_KEY": "sk-company",
+                "STT_OPENAI_BASE_URL": "https://api.openai.com.attacker.test/v1",
+            },
+            bind_enabled=True,
+        )
+        assert "OPENAI_API_KEY" not in out

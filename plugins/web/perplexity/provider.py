@@ -68,9 +68,9 @@ def _perplexity_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any
 
     api_key = get_provider_env("PERPLEXITY_API_KEY")
     base_url = (get_provider_env("PERPLEXITY_BASE_URL") or _DEFAULT_BASE_URL).rstrip("/")
-    from hermes_cli.billing_wallet import bound_vendor_secret
+    from hermes_cli.billing_wallet import web_company_secret
 
-    api_key = bound_vendor_secret(vendor="perplexity", company_secret=api_key or "", target_url=base_url)
+    api_key = web_company_secret(backend="perplexity", company_secret=api_key or "", target_url=base_url)
     if not api_key:
         raise ValueError(_missing_key_error())
     url = f"{base_url}/{endpoint.lstrip('/')}"

@@ -182,8 +182,17 @@ class ElevenLabsStreamer(StreamingTTSProvider):
         from tools.tts_tool_providers import (
             DEFAULT_ELEVENLABS_STREAMING_MODEL_ID, DEFAULT_ELEVENLABS_VOICE_ID, _elevenlabs_environment_kwargs,
         )
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        api_key = bound_vendor_secret(
+            vendor="elevenlabs",
+            company_secret=_resolve_key("ELEVENLABS_API_KEY", "elevenlabs"),
+            target_url=(self.section.get("base_url") or ""),
+        )
+        if not api_key:
+            raise ValueError("ELEVENLABS_API_KEY withheld from redirected TTS host")
         client = _import_elevenlabs()(
-            api_key=_resolve_key("ELEVENLABS_API_KEY", "elevenlabs"), **_elevenlabs_environment_kwargs(self.section),
+            api_key=api_key, **_elevenlabs_environment_kwargs(self.section),
         )
         yield from client.text_to_speech.convert(
             text=text, voice_id=self.section.get("voice_id", DEFAULT_ELEVENLABS_VOICE_ID),

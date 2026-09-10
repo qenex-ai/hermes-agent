@@ -1618,9 +1618,12 @@ DEFAULT_CONFIG = {
         # Company metered-aggregator keys (OPENROUTER_API_KEY, …) attach only when the operator
         # selected that aggregator (or auto / custom / local). Redirected tool/vendor hosts
         # (FIRECRAWL_API_URL, TAVILY_BASE_URL, STT/TTS base URLs, …) cannot inherit the company
-        # key. A hijack that injects OpenRouter as a silent last-rung, aux/vision hop, or
-        # redirected ``*_BASE_URL`` cannot spend the company wallet; a requestor-supplied key
-        # still attaches — they pay. False restores the historical fallthrough.
+        # key. Metered web/image/video/browser backends are not auto-selected from key presence.
+        # Child-process env loses company keys when a matching ``*_BASE_URL`` is unofficial.
+        # A hijack that injects OpenRouter as a silent last-rung, aux/vision hop, redirected
+        # ``*_BASE_URL``, or auto-selects a paid tool cannot spend the company wallet; a
+        # requestor-supplied key still attaches — they pay. False restores the historical
+        # fallthrough.
         "billing_wallet": {"bind_company_keys": True},
     },
 
