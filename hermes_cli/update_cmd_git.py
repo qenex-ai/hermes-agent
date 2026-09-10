@@ -104,8 +104,10 @@ def _assess_parked_branch_switch(git_cmd: list[str], cwd: Path, current_branch: 
     - (True, "unmerged:<n>") — tree clean but commits not in target; switching is safe (checkout keeps
       committed work) but caller must print a LOUD notice. Non-interactive callers (desktop, gateway
       /update, cron) can't resolve a skip, so a clean checkout must reach target.
-    - (False, "disabled"|"dirty"|"unverifiable") — caller must NOT touch the branch. Dirty is the
-      genuinely unsafe case: uncommitted work riding an autostash across branches.
+    - (False, "dirty") — uncommitted work is present. The guard must stash it on this branch and
+      *park* the stash (never restore onto the update target); skipping forever is what stranded
+      non-interactive HermesAction/cron retries.
+    - (False, "disabled"|"unverifiable") — caller must NOT touch the branch.
     A config read failure must not disable the safety checks: fall through with the default."""
     from hermes_cli.update_cmd import _git_run
     try:
@@ -165,6 +167,22 @@ def _print_parked_branch_kept_notice(current_branch: str, target_branch: str, un
         f"  Switching to {target_branch} so the update can proceed — your "
         f"commit(s) are safe on '{current_branch}'.\n\n"
         f"  To pick the work back up later:\n    git checkout {current_branch}\n{_BAR}"
+    )
+
+
+def _print_parked_branch_dirty_notice(current_branch: str, target_branch: str) -> None:
+    """LOUD notice: dirty parked branch will be stashed, switched, stash parked (not restored onto target).
+
+    Restoring the autostash onto *target* would ride uncommitted feature-branch edits onto main —
+    the failure class the original skip guarded. Parking the stash keeps the work and lets
+    non-interactive updates (HermesAction, gateway /update, cron) proceed."""
+    print(
+        f"\n{_BAR}\n"
+        f"⚠ Checkout was parked on '{current_branch}' with uncommitted changes.\n"
+        f"  Stashing them, switching to {target_branch} so the update can proceed,\n"
+        f"  and leaving the stash parked (not re-applied onto {target_branch}).\n\n"
+        f"  To restore the work later:\n"
+        f"    git checkout {current_branch} && git stash apply\n{_BAR}"
     )
 
 

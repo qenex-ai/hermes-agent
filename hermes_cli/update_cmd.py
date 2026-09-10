@@ -94,7 +94,8 @@ from hermes_cli.update_cmd_git import (  # noqa: F401
     _fetch_origin_branch, _get_origin_url, _git_is_trampoline,
     _has_upstream_remote, _is_fork, _locate_real_git, _mark_skip_upstream_prompt,
     _normalize_managed_eol, _portable_git_candidates, _print_fetch_failure,
-    _print_parked_branch_kept_notice, _print_parked_branch_skip_warning,
+    _print_parked_branch_dirty_notice, _print_parked_branch_kept_notice,
+    _print_parked_branch_skip_warning,
     _prune_orphan_rescue_refs, _should_skip_upstream_prompt, _stderr_is_missing_origin,
     _sync_fork_with_upstream, _sync_with_upstream_if_needed)
 from hermes_cli.update_cmd_maint import (  # noqa: F401
@@ -810,6 +811,7 @@ class _CheckoutPlan:
     commit_count: int
     in_place_update: bool
     parked_branch_switched: bool
+    park_stash: bool
     prompt_for_restore: bool
     switch_block_reason: "str | None"
     upstream_checked: bool
@@ -823,7 +825,8 @@ def _apply_parked_branch_guard(
 
     By branch contents + updates.parked_branch_strategy: fully merged -> switch back;
     unmerged -> "switch" (default; loud "kept" notice) or "update_in_place" (merge origin/<target>
-    INTO the branch, checkout never moves; --switch-branch overrides once); dirty/unverifiable ->
+    INTO the branch, checkout never moves; --switch-branch overrides once); dirty -> stash on
+    this branch, switch, park the stash (never restore onto the target); unverifiable/disabled ->
     touch nothing, warn, ``sys.exit(1)`` with the code update SKIPPED (also when the target is
     missing). Returns ``(parked_branch_switched, in_place_update, switch_block_reason)``.
     """
@@ -832,6 +835,9 @@ def _apply_parked_branch_guard(
     switch_safe, switch_block_reason = _m()._assess_parked_branch_switch(
         git_cmd, _m().PROJECT_ROOT, current_branch, branch)
     if not switch_safe:
+        if switch_block_reason == "dirty":
+            _m()._print_parked_branch_dirty_notice(current_branch, branch)
+            return True, False, switch_block_reason
         _m()._print_parked_branch_skip_warning(
             git_cmd, _m().PROJECT_ROOT, current_branch, branch, switch_block_reason)
         print()
@@ -886,8 +892,10 @@ def _prepare_checkout_for_update(
                 print(f"  {track_result.stderr.strip().splitlines()[0]}")
             sys.exit(1)
 
+    park_stash = switch_block_reason == "dirty"
     prompt_for_restore = (
         auto_stash_ref is not None
+        and not park_stash
         and not assume_yes
         and (gateway_mode or (sys.stdin.isatty() and sys.stdout.isatty())))
 
@@ -927,7 +935,8 @@ def _prepare_checkout_for_update(
 
     return _CheckoutPlan(
         auto_stash_ref=auto_stash_ref, commit_count=commit_count, in_place_update=in_place_update,
-        parked_branch_switched=parked_branch_switched, prompt_for_restore=prompt_for_restore,
+        parked_branch_switched=parked_branch_switched, park_stash=park_stash,
+        prompt_for_restore=prompt_for_restore,
         switch_block_reason=switch_block_reason, upstream_checked=upstream_checked)
 
 
@@ -1156,12 +1165,21 @@ def _finish_already_up_to_date(
 
     # Restore stash and switch back if we moved. EXCEPTION: a parked branch verified clean +
     # fully merged stays on the target — re-parking on the stale branch recreates the incident.
+    # Dirty parked stashes must stay parked too: restoring them onto the update target would
+    # ride uncommitted feature-branch edits onto main.
     if _plan.auto_stash_ref is not None:
-        _m()._restore_stashed_changes(
-            git_cmd, _m().PROJECT_ROOT, _plan.auto_stash_ref, prompt_user=_plan.prompt_for_restore,
-            input_fn=gw_input_fn)
+        if _plan.park_stash:
+            _m()._park_stashed_changes(_plan.auto_stash_ref)
+        else:
+            _m()._restore_stashed_changes(
+                git_cmd, _m().PROJECT_ROOT, _plan.auto_stash_ref,
+                prompt_user=_plan.prompt_for_restore, input_fn=gw_input_fn)
     if _plan.parked_branch_switched:
-        if _plan.switch_block_reason.startswith("unmerged:"):
+        if _plan.switch_block_reason == "dirty":
+            print(
+                f"  ✓ Checkout was parked on '{current_branch}' with uncommitted changes — "
+                f"stashed and switched to {branch}.")
+        elif (_plan.switch_block_reason or "").startswith("unmerged:"):
             _count = _plan.switch_block_reason.split(":", 1)[1]
             print(
                 f"  ✓ Checkout was parked on '{current_branch}' — switched back to {branch}; "
@@ -1353,10 +1371,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
             print("→ Updates available (commit count unknown on this shallow checkout)")
 
         print("→ Pulling updates...")
+        # Dirty parked-branch WIP is parked, never discarded: discard is for local
+        # edits on the update target, not uncommitted work left on a feature branch.
         pre_pull_sha = _pull_updates(
             git_cmd, branch, _plan.auto_stash_ref, prompt_for_restore=_plan.prompt_for_restore,
-            gw_input_fn=gw_input_fn, discard_local_changes=opts.discard_local_changes,
-            keep_stash=opts.keep_stash)
+            gw_input_fn=gw_input_fn,
+            discard_local_changes=opts.discard_local_changes and not _plan.park_stash,
+            keep_stash=opts.keep_stash or _plan.park_stash)
         _apply_pulled_update(
             git_cmd, branch, pre_pull_sha, _plan, opts, gateway_mode=gateway_mode,
             is_fork=is_fork, desktop_dir=desktop_dir,
