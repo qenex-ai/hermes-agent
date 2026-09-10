@@ -515,11 +515,14 @@ terminal:
 #     bind_company_keys: true   # Company OpenRouter/AI-Gateway keys never attach to a
 #                               # hijacked last-rung, aux/vision auto-detect hop, or
 #                               # redirected tool host (FIRECRAWL_API_URL, TAVILY_BASE_URL,
-#                               # STT/TTS base URLs). Metered web/image/video/browser
-#                               # backends are not auto-selected from key presence — pick
-#                               # them in `hermes tools`. Child processes lose company keys
-#                               # when a matching *_BASE_URL is unofficial. The requestor
-#                               # pays with their own key, or the call fails closed.
+#                               # STT/TTS base URLs, HONCHO_BASE_URL, SUPERMEMORY_BASE_URL,
+#                               # RETAINDB_BASE_URL, HINDSIGHT_API_URL, MEM0_HOST). Metered
+#                               # web/image/video/browser backends are not auto-selected
+#                               # from key presence — pick them in `hermes tools`. Child
+#                               # processes lose company keys when a matching *_BASE_URL is
+#                               # unofficial. The requestor pays with their own key, or the
+#                               # call fails closed. Self-hosted unofficial URL + company
+#                               # key needs this set false.
 
 # =============================================================================
 # Browser Tool Configuration
