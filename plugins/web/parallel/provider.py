@@ -24,9 +24,20 @@ _MISSING_KEY = "PARALLEL_API_KEY environment variable not set. Get your API key 
 def _client(slot: str, cls_name: str) -> Any:
     def _factory(api_key: str) -> Any:
         import parallel  # deliberately lazy
-        return getattr(parallel, cls_name)(api_key=api_key)
+        kwargs: Dict[str, Any] = {"api_key": api_key}
+        base = provider_env("PARALLEL_API_URL") or provider_env("PARALLEL_BASE_URL")
+        if base:
+            kwargs["base_url"] = base
+        try:
+            return getattr(parallel, cls_name)(**kwargs)
+        except TypeError:
+            return getattr(parallel, cls_name)(api_key=api_key)
 
-    return cached_sdk_client(slot, "PARALLEL_API_KEY", _MISSING_KEY, "search.parallel", _factory)
+    target = provider_env("PARALLEL_API_URL") or provider_env("PARALLEL_BASE_URL")
+    return cached_sdk_client(
+        slot, "PARALLEL_API_KEY", _MISSING_KEY, "search.parallel", _factory,
+        vendor="parallel", target_url=target,
+    )
 
 
 def _get_sync_client() -> Any:
@@ -53,7 +64,13 @@ class ParallelWebSearchProvider(BaseWebSearchProvider):
 
     def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
         def _body() -> Dict[str, Any]:
-            if use_keyless("parallel", provider_env("PARALLEL_API_KEY")):
+            from hermes_cli.billing_wallet import web_company_secret
+
+            target = provider_env("PARALLEL_API_URL") or provider_env("PARALLEL_BASE_URL")
+            key = web_company_secret(
+                backend="parallel", company_secret=provider_env("PARALLEL_API_KEY"), target_url=target,
+            )
+            if use_keyless("parallel", key):
                 return keyless_search("Parallel", "parallel", query, limit, logger)
             mode = _resolve_search_mode()
             logger.info("Parallel search: '%s' (mode=%s, limit=%d)", query, mode, limit)
@@ -67,7 +84,13 @@ class ParallelWebSearchProvider(BaseWebSearchProvider):
 
     async def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:
         async def _body() -> List[Dict[str, Any]]:
-            if use_keyless("parallel", provider_env("PARALLEL_API_KEY")):
+            from hermes_cli.billing_wallet import web_company_secret
+
+            target = provider_env("PARALLEL_API_URL") or provider_env("PARALLEL_BASE_URL")
+            key = web_company_secret(
+                backend="parallel", company_secret=provider_env("PARALLEL_API_KEY"), target_url=target,
+            )
+            if use_keyless("parallel", key):
                 # Keyless ring is blocking HTTP — hop off the event loop.
                 return await asyncio.to_thread(keyless_extract, "Parallel", "parallel", urls, logger)
             logger.info("Parallel extract: %d URL(s)", len(urls))

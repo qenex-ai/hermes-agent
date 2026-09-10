@@ -317,16 +317,13 @@ class TestResolutionOrder:
         monkeypatch.setattr(registry, "_keyless_tier_enabled", lambda: False)
         assert registry.get_active_search_provider() is None
 
-    def test_keyed_provider_beats_keyless(self, fresh_registry, monkeypatch):
-        # Exa keyed, Parallel keyless: legacy walk must pick exa (keyed)
-        # even though parallel precedes exa in _KEYLESS_PREFERENCE.
-        monkeypatch.setattr(registry, "_read_config_key", lambda *p: None)
-        monkeypatch.setattr(
-            "agent.web_search_provider.get_provider_env",
-            lambda name: "sk-real" if name == "EXA_API_KEY" else "",
-        )
-        provider = registry.get_active_search_provider()
-        assert provider is not None and provider.name == "exa"
+    def test_keyed_provider_does_not_spend_company_exa_on_keyless_walk(self, monkeypatch):
+        """An unused EXA_API_KEY must not attach just because Exa is in the ring."""
+        from hermes_cli.billing_wallet import web_company_secret
+
+        monkeypatch.setattr("plugins.web.keyless_mcp._web_config_selects", lambda name: False)
+        assert web_company_secret(backend="exa", company_secret="sk-real", bind_enabled=True) == ""
+        assert web_company_secret(backend="exa", company_secret="sk-real", bind_enabled=False) == "sk-real"
 
     def test_get_backend_keyless_last(self, monkeypatch):
         # No creds at all -> a keyless vendor per the process-stable split.
@@ -342,12 +339,14 @@ class TestResolutionOrder:
         )
         assert web_tools._get_backend() == expected
 
-    def test_get_backend_key_beats_keyless(self, monkeypatch):
+    def test_get_backend_key_does_not_beat_keyless(self, monkeypatch):
+        """Company EXA_API_KEY is not consent to skip the keyless free tier."""
         monkeypatch.setattr(
             web_tools, "_env_value",
             lambda name: "sk-x" if name == "EXA_API_KEY" else "",
         )
-        assert web_tools._get_backend() == "exa"
+        monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
+        assert web_tools._get_backend() != "exa"
 
     def test_get_backend_keyless_disabled(self, monkeypatch):
         monkeypatch.setattr(

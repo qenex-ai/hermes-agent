@@ -60,9 +60,11 @@ Do not add a surface-specific goal parser. ACP has no goal command or goal loop 
   memory, security, delegation, smart_model_routing, checkpoints, auxiliary, curator, skills,
   gateway, logging, cron, profiles, plugins, honcho`. `auxiliary` = per-task side-LLM overrides
   (`agent/AGENTS.md`); `curator` = `enabled, interval_hours, min_idle_hours, stale_after_days,
-  archive_after_days, backup.*`. `security.billing_wallet.bind_company_keys` (default True) binds
+  archive_after_days, backup.*`.   `security.billing_wallet.bind_company_keys` (default True) binds
   company OpenRouter/AI-Gateway keys so a last-rung / aux / vision auto-detect hijack cannot spend
-  them, and withholds company tool/vendor keys from redirected ``*_BASE_URL`` hosts;
+  them, withholds company tool/vendor keys from redirected ``*_BASE_URL`` hosts, refuses to
+  auto-select a metered web/image/video/browser backend from key presence alone, and strips
+  company keys from child-process env when the matching base URL is unofficial;
   `hermes_cli/billing_wallet.py` is the contract.
 - **.env = SECRETS ONLY** (keys, tokens, passwords): add to `OPTIONAL_ENV_VARS` with
   `{"description", "prompt", "url", "password": True, "category": provider|tool|messaging|setting}`.
