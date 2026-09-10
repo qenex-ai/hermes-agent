@@ -40,6 +40,10 @@ def test_fail_open_uses_canonical_runner_and_blanks_api_keys():
     assert "uv lock --check" in joined
     assert "uv sync --locked" in joined
     assert "run-workspace-checks.mjs" in joined
+    # nvm's install.sh exits 3 in non-interactive CI after printing
+    # "Close and reopen your terminal"; the JS lane must not invoke it.
+    assert "nvm-sh/nvm" not in joined
+    assert "nodejs.org/dist/latest-v" in joined
     env = pipeline_env()
     assert env["OPENROUTER_API_KEY"] == ""
     assert env["OPENAI_API_KEY"] == ""

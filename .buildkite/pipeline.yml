@@ -135,13 +135,45 @@ steps:
     key: js-checks
     command: |
       set -euo pipefail
-      export NVM_DIR="$$HOME/.nvm"
-      if [ ! -s "$$NVM_DIR/nvm.sh" ]; then
-        curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh" | bash
+      if ! command -v node >/dev/null 2>&1 || ! node -v | grep -q '^v26\.'; then
+        NODE_ARCH=$$(uname -m)
+        case "$$NODE_ARCH" in
+          x86_64) NODE_ARCH=x64 ;;
+          aarch64|arm64) NODE_ARCH=arm64 ;;
+          *) echo "unsupported arch: $$NODE_ARCH" >&2; exit 1 ;;
+        esac
+        NODE_TMP=$$(mktemp -d)
+        curl -fsSL --retry 3 --retry-delay 5 \
+          "https://nodejs.org/dist/latest-v26.x/SHASUMS256.txt" \
+          -o "$$NODE_TMP/SHASUMS256.txt"
+        NODE_TARBALL=""
+        NODE_HASH=""
+        while read -r NODE_HASH NODE_TARBALL; do
+          case "$$NODE_TARBALL" in
+            node-v*-linux-"$$NODE_ARCH".tar.gz)
+              break
+              ;;
+          esac
+          NODE_TARBALL=""
+          NODE_HASH=""
+        done < "$$NODE_TMP/SHASUMS256.txt"
+        if [ -z "$$NODE_TARBALL" ] || [ -z "$$NODE_HASH" ]; then
+          echo "could not resolve node 26 linux-$$NODE_ARCH tarball" >&2
+          cat "$$NODE_TMP/SHASUMS256.txt" >&2
+          exit 1
+        fi
+        curl -fsSL --retry 3 --retry-delay 5 \
+          "https://nodejs.org/dist/latest-v26.x/$$NODE_TARBALL" \
+          -o "$$NODE_TMP/$$NODE_TARBALL"
+        echo "$$NODE_HASH  $$NODE_TMP/$$NODE_TARBALL" | sha256sum -c -
+        rm -rf "$$HOME/.local/node"
+        mkdir -p "$$HOME/.local/node"
+        tar -xzf "$$NODE_TMP/$$NODE_TARBALL" -C "$$HOME/.local/node" --strip-components=1
+        rm -rf "$$NODE_TMP"
       fi
-      . "$$NVM_DIR/nvm.sh"
-      nvm install 26
-      nvm use 26
+      export PATH="$$HOME/.local/node/bin:$$PATH"
+      node --version
+      npm --version
       npm --version | grep -q '^12\.' || npm i -g npm@12
       npm ci
       node .github/scripts/run-workspace-checks.mjs

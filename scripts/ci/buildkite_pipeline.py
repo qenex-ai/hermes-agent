@@ -34,7 +34,6 @@ _CLASSIFY_PATH = Path(__file__).resolve().parent / "classify_changes.py"
 UV_VERSION = "0.9.28"
 PYTHON_VERSION = "3.11"
 NODE_MAJOR = "26"
-NVM_VERSION = "0.40.3"
 RG_VERSION = "15.1.0"
 RG_SHA256 = "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599"
 
@@ -78,6 +77,56 @@ def _uv_prelude() -> str:
     return f"""set -euo pipefail
 curl -LsSf "https://astral.sh/uv/{UV_VERSION}/install.sh" | sh
 export PATH="$$HOME/.local/bin:$$PATH"
+"""
+
+
+def _node_prelude() -> str:
+    """Install Node from nodejs.org. nvm's install.sh exits 3 in CI.
+
+    The installer prints "Close and reopen your terminal" and then returns 3
+    in a non-interactive shell (no profile to edit, nvm not loaded). With
+    ``set -euo pipefail``, ``curl | bash`` aborts the job before ``. nvm.sh``.
+    """
+    # ``$$`` / ``{{`` survive Buildkite interpolation and f-string braces.
+    return f"""if ! command -v node >/dev/null 2>&1 || ! node -v | grep -q '^v{NODE_MAJOR}\\.'; then
+  NODE_ARCH=$$(uname -m)
+  case "$$NODE_ARCH" in
+    x86_64) NODE_ARCH=x64 ;;
+    aarch64|arm64) NODE_ARCH=arm64 ;;
+    *) echo "unsupported arch: $$NODE_ARCH" >&2; exit 1 ;;
+  esac
+  NODE_TMP=$$(mktemp -d)
+  curl -fsSL --retry 3 --retry-delay 5 \\
+    "https://nodejs.org/dist/latest-v{NODE_MAJOR}.x/SHASUMS256.txt" \\
+    -o "$$NODE_TMP/SHASUMS256.txt"
+  NODE_TARBALL=""
+  NODE_HASH=""
+  while read -r NODE_HASH NODE_TARBALL; do
+    case "$$NODE_TARBALL" in
+      node-v*-linux-"$$NODE_ARCH".tar.gz)
+        break
+        ;;
+    esac
+    NODE_TARBALL=""
+    NODE_HASH=""
+  done < "$$NODE_TMP/SHASUMS256.txt"
+  if [ -z "$$NODE_TARBALL" ] || [ -z "$$NODE_HASH" ]; then
+    echo "could not resolve node {NODE_MAJOR} linux-$$NODE_ARCH tarball" >&2
+    cat "$$NODE_TMP/SHASUMS256.txt" >&2
+    exit 1
+  fi
+  curl -fsSL --retry 3 --retry-delay 5 \\
+    "https://nodejs.org/dist/latest-v{NODE_MAJOR}.x/$$NODE_TARBALL" \\
+    -o "$$NODE_TMP/$$NODE_TARBALL"
+  echo "$$NODE_HASH  $$NODE_TMP/$$NODE_TARBALL" | sha256sum -c -
+  rm -rf "$$HOME/.local/node"
+  mkdir -p "$$HOME/.local/node"
+  tar -xzf "$$NODE_TMP/$$NODE_TARBALL" -C "$$HOME/.local/node" --strip-components=1
+  rm -rf "$$NODE_TMP"
+fi
+export PATH="$$HOME/.local/node/bin:$$PATH"
+node --version
+npm --version
 """
 
 
@@ -208,18 +257,13 @@ def uv_lock_steps() -> list[dict[str, Any]]:
 
 
 def frontend_steps() -> list[dict[str, Any]]:
-    command = f"""set -euo pipefail
-export NVM_DIR="$$HOME/.nvm"
-if [ ! -s "$$NVM_DIR/nvm.sh" ]; then
-  curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/v{NVM_VERSION}/install.sh" | bash
-fi
-. "$$NVM_DIR/nvm.sh"
-nvm install {NODE_MAJOR}
-nvm use {NODE_MAJOR}
-npm --version | grep -q '^12\\.' || npm i -g npm@12
-npm ci
-node .github/scripts/run-workspace-checks.mjs
-"""
+    command = (
+        "set -euo pipefail\n"
+        + _node_prelude()
+        + "npm --version | grep -q '^12\\.' || npm i -g npm@12\n"
+        + "npm ci\n"
+        + "node .github/scripts/run-workspace-checks.mjs\n"
+    )
     return [
         _step(":node: JS & TS checks", command, key="js-checks", timeout=30),
     ]
