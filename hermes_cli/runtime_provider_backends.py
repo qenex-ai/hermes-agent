@@ -144,6 +144,7 @@ def _resolve_openrouter_runtime(
         requested_norm == "openrouter" and (env_openrouter_base_url or base_url == env_openrouter_base_url)
         and base_url == (env_openrouter_base_url or "").rstrip("/")
     )
+    eligible = True
     if is_openrouter_context:
         from hermes_cli.billing_wallet import (
             aggregator_api_key_candidates, company_openrouter_wallet_eligible, record_billing_hijack,
@@ -166,7 +167,9 @@ def _resolve_openrouter_runtime(
         candidates = [explicit_api_key, (cfg_api_key if use_config_base_url else ""),
                       *rp._host_gated_env_key_candidates(base_url, ollama=True)]
     api_key = next((str(c or "").strip() for c in candidates if rp.has_usable_secret(c)), "")
-    if is_openrouter_context and not api_key:
+    # Fail closed only for a hijacked last-rung hop. An operator-selected OpenRouter
+    # request with no key still resolves (historical 401), so `/model openrouter` can prompt.
+    if is_openrouter_context and not api_key and not eligible:
         raise rp.AuthError(
             "Billing hijack blocked: OpenRouter was not selected for this request, so the "
             "company OpenRouter wallet is closed. Supply your own OpenRouter key to pay for "

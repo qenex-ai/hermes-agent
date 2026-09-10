@@ -49,3 +49,16 @@ def test_explicit_openrouter_still_uses_company_key(monkeypatch, bind_on):
 
     resolved = rp._resolve_openrouter_runtime(requested_provider="openrouter")
     assert resolved["api_key"] == "sk-company-or"
+
+
+def test_operator_selected_openrouter_without_key_still_resolves(monkeypatch, bind_on):
+    """Empty-key OpenRouter after an explicit selection is a loud 401, not a hijack block."""
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {"provider": "openrouter"})
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    monkeypatch.delenv("CUSTOM_BASE_URL", raising=False)
+
+    resolved = rp._resolve_openrouter_runtime(requested_provider="openrouter")
+    assert resolved["provider"] == "openrouter"
+    assert not (resolved["api_key"] or "").strip()
