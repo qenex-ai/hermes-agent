@@ -85,6 +85,7 @@ import {
   setBusy,
   setMessages
 } from '@/store/session'
+import { $titlebarAppActionsSide, titlebarAppActionsClusterCounts } from '@/store/titlebar-app-actions'
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '@/store/todos'
 import { armWakeWord, stopClientCapture } from '@/store/wake-word'
 import { isAuxiliaryWindow, isBrowserWindow, isHudWindow } from '@/store/windows'
@@ -1200,12 +1201,16 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   }
 
   const titlebarToolsRight = titlebarToolsRightCss(nativeOverlayWidth, titlebarChrome)
-  // App controls live on the left; flip and the right toggle share the right.
-  const titlebarToolsWidth = titlebarToolsWidthCss(2)
+  const appActionsSide = useStore($titlebarAppActionsSide)
+  const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
+  const leftExtraCount = leftTitlebarTools.filter(tool => !tool.hidden).length
+  const clusters = titlebarAppActionsClusterCounts(appActionsSide, leftExtraCount, 0)
+  const systemToolsWidth = titlebarToolsWidthCss(clusters.right)
 
-  const leftToolsWidth = titlebarToolsWidthCss(
-    4 + [...leftTitlebarTools, ...rightTitlebarTools].filter(tool => !tool.hidden).length
-  )
+  const titlebarToolsWidth =
+    paneToolCount > 0 ? `calc(${systemToolsWidth} + ${titlebarToolsWidthCss(paneToolCount)})` : systemToolsWidth
+
+  const leftToolsWidth = titlebarToolsWidthCss(clusters.left)
 
   return (
     <ContribWiringContext.Provider value={api}>
@@ -1218,7 +1223,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             '--titlebar-controls-width': leftToolsWidth,
             '--titlebar-controls-y-nudge': titlebarControlsYNudge(titlebarChrome),
             '--titlebar-tools-right': titlebarToolsRight,
-            '--titlebar-tools-width': titlebarToolsWidth
+            '--titlebar-tools-width': titlebarToolsWidth,
+            '--shell-preview-toolbar-gap': systemToolsWidth
           } as CSSProperties
         }
       >
