@@ -327,6 +327,7 @@ def _behavior_fields(look: _HostLookup, explicitly_configured: bool) -> dict[str
         **_resolve_observation(observation_mode, look.pick("observation")),
         "session_strategy": look.pick("sessionStrategy", "per-directory"),
         "session_peer_prefix": look.pick_set("sessionPeerPrefix", False),
+        "a2a_sessions": look.flag("a2aSessions", default=True),
     }
 
 
@@ -389,6 +390,8 @@ class HonchoClientConfig:
     # Session resolution
     session_strategy: str = "per-directory"
     session_peer_prefix: bool = False
+    # Bot-authored DMs write into their own session per sender bot.
+    a2a_sessions: bool = True
     sessions: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
     # A hosts.<host> block or explicit enabled flag, vs auto-enabled from a stray env key.
