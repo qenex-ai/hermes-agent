@@ -37,6 +37,9 @@ Project config: [`.cursor/mcp.json`](https://github.com/qenex-ai/hermes-agent/bl
     },
     "pipedrive": {
       "url": "https://mcp.pipedrive.ai/mcp"
+    },
+    "sourcegraph": {
+      "url": "https://sourcegraph.com/.api/mcp"
     }
   }
 }
@@ -72,12 +75,23 @@ A live probe of `mcp.pipedrive.ai` (2026-09-10):
 
 The committed `url` is therefore `https://mcp.pipedrive.ai/mcp`. Hermes-as-client: `hermes mcp` → install catalog entry `pipedrive`. Claude.ai: [Pipedrive MCP for Claude](https://support.pipedrive.com/en/article/mcp-claude) (`Customize` → `Connectors` → add `https://mcp.pipedrive.ai/mcp`).
 
+**`sourcegraph` (HTTP):** official Sourcegraph Cloud MCP at `https://sourcegraph.com/.api/mcp`. Cursor prompts for **OAuth** on first connect. Do not put access tokens in the project file.
+
+### Sourcegraph URL path
+
+A live probe of `sourcegraph.com` (2026-09-11):
+
+- `POST https://sourcegraph.com/.api/mcp` → `401` with `WWW-Authenticate: Bearer` and `resource_metadata` pointing at `https://sourcegraph.com/.well-known/oauth-protected-resource/.api/mcp` (MCP endpoint present; auth required). OAuth `resource` is `https://sourcegraph.com/.api/mcp`
+- Origin returns HTML; `/sse` returns `404`
+
+The committed `url` is therefore `https://sourcegraph.com/.api/mcp`. Hermes-as-client: `hermes mcp` → install catalog entry `sourcegraph`. Self-hosted: `https://<your-instance>/.api/mcp`. GitHub Copilot CLI is optional and not configured in this checkout.
+
 ## Enable
 
 1. Install Hermes so `hermes doctor` works in a login shell.
 2. Open this repo in Cursor. Project MCP servers load from `.cursor/mcp.json`.
-3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, `supabase`, and `pipedrive`; complete QENEX, Supabase, and Pipedrive OAuth if prompted.
-4. Confirm messaging-bridge tools appear — not an ACP Hermes session panel. Confirm Supabase tools such as `list_tables` appear for project `tmsvyuxaiozmcxdaaqeu`. Confirm Pipedrive deal/contact tools appear after OAuth.
+3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, `supabase`, `pipedrive`, and `sourcegraph`; complete QENEX, Supabase, Pipedrive, and Sourcegraph OAuth if prompted.
+4. Confirm messaging-bridge tools appear — not an ACP Hermes session panel. Confirm Supabase tools such as `list_tables` appear for project `tmsvyuxaiozmcxdaaqeu`. Confirm Pipedrive deal/contact tools appear after OAuth. Confirm Sourcegraph search tools appear after OAuth.
 
 ## See also
 

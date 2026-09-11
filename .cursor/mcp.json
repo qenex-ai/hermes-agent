@@ -12,6 +12,9 @@
     },
     "pipedrive": {
       "url": "https://mcp.pipedrive.ai/mcp"
+    },
+    "sourcegraph": {
+      "url": "https://sourcegraph.com/.api/mcp"
     }
   }
 }

@@ -92,12 +92,30 @@ The committed URL is therefore **`https://mcp.pipedrive.ai/mcp`**, matching the 
 
 **Claude.ai / Claude Desktop:** [Pipedrive MCP for Claude](https://support.pipedrive.com/en/article/mcp-claude) — Customize → Connectors → Add custom connector, name `Pipedrive MCP BETA`, connection `https://mcp.pipedrive.ai/mcp`. Enable “load all available tools” in the connector if Claude truncates the tool list. ChatGPT: [Pipedrive MCP for ChatGPT](https://support.pipedrive.com/en/article/mcp-chatgpt).
 
+### `sourcegraph` (HTTP MCP)
+
+```json
+"sourcegraph": {
+  "url": "https://sourcegraph.com/.api/mcp"
+}
+```
+
+Official Sourcegraph Cloud MCP ([docs](https://sourcegraph.com/docs/api/mcp)). Cursor prompts for **OAuth** on first connect (Dynamic Client Registration, scope `mcp`). Do not put access tokens in the project file. Token auth is optional for local/user config: set `SOURCEGRAPH_ACCESS_TOKEN` and add `"Authorization": "token ${env:SOURCEGRAPH_ACCESS_TOKEN}"`.
+
+**Path check (ops):** a live probe of `sourcegraph.com` (2026-09-11) found:
+
+- `POST https://sourcegraph.com/.api/mcp` → `401` with `WWW-Authenticate: Bearer resource_metadata="https://sourcegraph.com/.well-known/oauth-protected-resource/.api/mcp", scope="mcp"` (MCP endpoint present; auth required). OAuth `resource` is `https://sourcegraph.com/.api/mcp`
+- `POST https://sourcegraph.com/` → HTML (not MCP)
+- `POST https://sourcegraph.com/sse` → `404`
+
+The committed URL is therefore **`https://sourcegraph.com/.api/mcp`**, matching the OAuth resource metadata. Hermes-as-client: `hermes mcp` → install catalog entry `sourcegraph`. Self-hosted instances use `https://<your-instance>/.api/mcp`. GitHub Copilot CLI (optional, not configured here): `copilot mcp add --transport http sourcegraph https://sourcegraph.com/.api/mcp` then `/mcp auth sourcegraph`.
+
 ## Enable in Cursor
 
 1. Install Hermes so `hermes` is on your shell PATH (`hermes doctor` should work).
 2. Open this repo in Cursor. Project MCP servers load from `.cursor/mcp.json`.
-3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, `supabase`, and `pipedrive`. Approve QENEX, Supabase, and Pipedrive OAuth if prompted.
-4. Confirm `hermes` tools such as `conversations_list` / `messages_send` appear — not the Hermes ACP session UI. Confirm Supabase tools such as `list_tables` / `execute_sql` appear for project `tmsvyuxaiozmcxdaaqeu`. Confirm Pipedrive deal/contact tools appear after OAuth.
+3. **Cursor Settings → MCP**: enable `hermes`, `qenex`, `supabase`, `pipedrive`, and `sourcegraph`. Approve QENEX, Supabase, Pipedrive, and Sourcegraph OAuth if prompted.
+4. Confirm `hermes` tools such as `conversations_list` / `messages_send` appear — not the Hermes ACP session UI. Confirm Supabase tools such as `list_tables` / `execute_sql` appear for project `tmsvyuxaiozmcxdaaqeu`. Confirm Pipedrive deal/contact tools appear after OAuth. Confirm Sourcegraph tools such as `keyword_search` / `nls_search` appear after OAuth.
 
 User-level Cursor MCP config (`~/.cursor/mcp.json`) is fine for personal servers; keep fork defaults in the project file so the checkout is self-describing.
 
