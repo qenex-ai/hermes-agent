@@ -148,13 +148,20 @@ def _hosted_ocr_config() -> tuple:
     live-probed broken, so it is NOT used. ``file_tools.hosted_ocr: false`` disables even with a
     key."""
     api_key = os.environ.get("FIRECRAWL_API_KEY") or None
+    api_url = (os.environ.get("FIRECRAWL_API_URL") or "").strip() or None
+    if api_key:
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        api_key = bound_vendor_secret(
+            vendor="firecrawl", company_secret=api_key, target_url=api_url or "",
+        ) or None
     enabled = api_key is not None
     with contextlib.suppress(Exception):
         from hermes_cli.config import load_config_readonly
         section = load_config_readonly().get("file_tools")
         if isinstance(section, dict) and section.get("hosted_ocr") is False:
             enabled = False
-    return enabled, api_key, None
+    return enabled, api_key, api_url
 
 
 def hosted_ocr_available() -> bool:

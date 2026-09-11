@@ -53,9 +53,17 @@ def _resolve_openai_audio_client_config() -> tuple[str, str, bool]:
                 "tts", NOUS_MANAGED_PROVIDER,
                 "the Nous Tool Gateway is not available (not entitled or unreachable)"))
         return route
-    direct_api_key = openai_cfg.get("api_key") or resolve_openai_audio_api_key()
+    cfg_key = (openai_cfg.get("api_key") or "").strip()
+    env_key = (resolve_openai_audio_api_key() or "").strip()
+    base_url = openai_cfg.get("base_url") or DEFAULT_OPENAI_BASE_URL
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    # Config key is operator-selected for this TTS base; env OPENAI_API_KEY is the company wallet.
+    direct_api_key = cfg_key or bound_vendor_secret(
+        vendor="openai", company_secret=env_key, target_url=base_url,
+    )
     if direct_api_key:
-        return direct_api_key, openai_cfg.get("base_url") or DEFAULT_OPENAI_BASE_URL, False
+        return direct_api_key, base_url, False
     if selected is not None:
         raise ValueError(selection_error(
             "tts", selected,

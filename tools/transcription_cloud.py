@@ -83,6 +83,9 @@ def _transcribe_groq(
     """Transcribe via the Groq Whisper API; language: hook > ``stt.groq.language`` > ``stt.language`` > env > auto."""
     from tools.transcription_tools import _HAS_OPENAI, _resolve_provider_key, _resolve_stt_language
     api_key = _resolve_provider_key("GROQ_API_KEY", "groq")
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    api_key = bound_vendor_secret(vendor="groq", company_secret=api_key or "", target_url=GROQ_BASE_URL)
     if not api_key:
         return _error_result("GROQ_API_KEY not set")
     if not _HAS_OPENAI:
@@ -260,6 +263,11 @@ def _transcribe_xai(
                      if is_truthy_value(xai_config.get(flag, default))})
 
         def _post_transcription(bearer: str, endpoint_base_url: str):
+            from hermes_cli.billing_wallet import bound_vendor_secret
+
+            bearer = bound_vendor_secret(vendor="xai", company_secret=bearer, target_url=endpoint_base_url)
+            if not bearer:
+                raise ValueError("xAI company key withheld from redirected STT host")
             headers = {"Authorization": f"Bearer {bearer}", "User-Agent": hermes_xai_user_agent()}
             return _post_audio_multipart(f"{endpoint_base_url}/stt", headers, file_path, data)
 
@@ -306,6 +314,11 @@ def _transcribe_elevenlabs(
     base_url = str(
         elevenlabs_config.get("base_url") or get_env_value("ELEVENLABS_STT_BASE_URL") or ELEVENLABS_STT_BASE_URL
     ).strip().rstrip("/")
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    api_key = bound_vendor_secret(vendor="elevenlabs", company_secret=api_key, target_url=base_url)
+    if not api_key:
+        return _error_result("ELEVENLABS_API_KEY not set")
     # Language: hook override > stt.elevenlabs.language(_code) > stt.language.
     language_code = language or _resolve_stt_language("elevenlabs", stt_config, extra_keys=("language_code",)) or ""
 
@@ -371,8 +384,13 @@ def _direct_openai_credentials(cfg_api_key: str, cfg_base_url: str) -> Optional[
     # construct a client (#25193, credit @nnnet).
     if cfg_base_url and _is_local_or_private_url(cfg_base_url):
         return "not-needed", cfg_base_url
-    direct_api_key = resolve_openai_audio_api_key()
-    return (direct_api_key, OPENAI_BASE_URL) if direct_api_key else None
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
+    target = cfg_base_url or OPENAI_BASE_URL
+    direct_api_key = bound_vendor_secret(
+        vendor="openai", company_secret=resolve_openai_audio_api_key() or "", target_url=target,
+    )
+    return (direct_api_key, target) if direct_api_key else None
 
 
 def _resolve_openai_audio_client_config() -> tuple[str, str]:

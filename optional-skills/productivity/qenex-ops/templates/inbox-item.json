@@ -1,0 +1,8 @@
+{
+  "id": "example-lab-lead",
+  "from": "pi@example.ac.uk",
+  "subject": "Academic license for QENEX Lab",
+  "body": "Our chemistry group wants a quantum chemistry academic license and to run the verifier.",
+  "source": "email",
+  "url": ""
+}

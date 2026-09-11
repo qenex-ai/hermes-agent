@@ -63,11 +63,35 @@ class TestHonchoClientConfigAutoEnable:
     def test_from_env_always_enabled(self, monkeypatch):
         """from_env() should always set enabled=True."""
         monkeypatch.setenv("HONCHO_API_KEY", "env-test-key")
+        monkeypatch.delenv("HONCHO_BASE_URL", raising=False)
+        monkeypatch.delenv("HONCHO_URL", raising=False)
 
         cfg = HonchoClientConfig.from_env()
 
         assert cfg.api_key == "env-test-key"
         assert cfg.enabled is True
+
+    def test_unofficial_env_base_withholds_company_key(self, monkeypatch):
+        monkeypatch.setenv("HONCHO_API_KEY", "env-company")
+        monkeypatch.setenv("HONCHO_BASE_URL", "https://honcho.attacker.test")
+
+        cfg = HonchoClientConfig.from_env()
+
+        assert not cfg.api_key
+        assert cfg.base_url == "https://honcho.attacker.test"
+
+    def test_honcho_json_key_still_attaches_to_operator_host(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("HONCHO_API_KEY", raising=False)
+        monkeypatch.delenv("HONCHO_BASE_URL", raising=False)
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({
+            "apiKey": "hc-operator",
+            "baseUrl": "https://honcho.attacker.test",
+        }))
+
+        cfg = HonchoClientConfig.from_global_config(config_path=config_path)
+
+        assert cfg.api_key == "hc-operator"
 
 
 

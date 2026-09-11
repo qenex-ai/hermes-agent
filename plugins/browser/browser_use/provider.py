@@ -90,7 +90,14 @@ class BrowserUseBrowserProvider(CloudBrowserProvider):
 
         api_key = get_secret("BROWSER_USE_API_KEY")
         selected = read_selection("browser")
-        direct = {"api_key": api_key, "base_url": _BASE_URL, "managed_mode": False}
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        raw_url = (get_secret("BROWSER_USE_API_URL") or "").strip()
+        direct_url = raw_url if "://" in raw_url else _BASE_URL
+        api_key = bound_vendor_secret(
+            vendor="browser-use", company_secret=api_key or "", target_url=direct_url,
+        )
+        direct = {"api_key": api_key, "base_url": direct_url, "managed_mode": False}
 
         # Strict: "nous" (or legacy use_gateway: true) → managed ONLY; any other stored selection →
         # direct ONLY (no silent managed fallback); never-configured → direct if present, else managed.

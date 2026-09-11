@@ -182,8 +182,17 @@ class ElevenLabsStreamer(StreamingTTSProvider):
         from tools.tts_tool_providers import (
             DEFAULT_ELEVENLABS_STREAMING_MODEL_ID, DEFAULT_ELEVENLABS_VOICE_ID, _elevenlabs_environment_kwargs,
         )
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        api_key = bound_vendor_secret(
+            vendor="elevenlabs",
+            company_secret=_resolve_key("ELEVENLABS_API_KEY", "elevenlabs"),
+            target_url=(self.section.get("base_url") or ""),
+        )
+        if not api_key:
+            raise ValueError("ELEVENLABS_API_KEY withheld from redirected TTS host")
         client = _import_elevenlabs()(
-            api_key=_resolve_key("ELEVENLABS_API_KEY", "elevenlabs"), **_elevenlabs_environment_kwargs(self.section),
+            api_key=api_key, **_elevenlabs_environment_kwargs(self.section),
         )
         yield from client.text_to_speech.convert(
             text=text, voice_id=self.section.get("voice_id", DEFAULT_ELEVENLABS_VOICE_ID),
@@ -210,9 +219,15 @@ class OpenAIStreamer(StreamingTTSProvider):
 
     def stream(self, text: str) -> Iterator[bytes]:
         from openai import OpenAI
-        client = OpenAI(
-            api_key=(self.section.get("api_key") or resolve_openai_audio_api_key()),
-            base_url=(self.section.get("base_url") or get_env_value("OPENAI_BASE_URL") or None))
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        base_url = self.section.get("base_url") or get_env_value("OPENAI_BASE_URL") or None
+        cfg_key = (self.section.get("api_key") or "").strip()
+        env_key = (resolve_openai_audio_api_key() or "").strip()
+        api_key = cfg_key or bound_vendor_secret(
+            vendor="openai", company_secret=env_key, target_url=base_url or "",
+        )
+        client = OpenAI(api_key=api_key, base_url=base_url)
         with client.audio.speech.with_streaming_response.create(
             model=self.section.get("model", "gpt-4o-mini-tts"), voice=self.section.get("voice", "alloy"),
             input=text, response_format="pcm",
@@ -244,6 +259,11 @@ class GeminiStreamer(StreamingTTSProvider):
         base_url = str(
             self.section.get("base_url") or get_env_value("GEMINI_BASE_URL") or DEFAULT_GEMINI_TTS_BASE_URL
         ).strip().rstrip("/")
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        api_key = bound_vendor_secret(vendor="gemini", company_secret=api_key or "", target_url=base_url)
+        if not api_key:
+            raise ValueError("Gemini company key withheld from redirected TTS host")
         payload = {
             "contents": [{"parts": [{"text": text}]}],
             "generationConfig": {

@@ -286,6 +286,7 @@ const sidebars: SidebarsConfig = {
                   collapsed: true,
                   items: [
                     'user-guide/skills/bundled/software-development/software-development-codebase-inspection',
+                    'user-guide/skills/bundled/software-development/software-development-cursor-sdk',
                     'user-guide/skills/bundled/software-development/software-development-dogfood',
                     'user-guide/skills/bundled/software-development/software-development-github',
                     'user-guide/skills/bundled/software-development/software-development-hermes-agent-skill-authoring',
@@ -739,6 +740,7 @@ const sidebars: SidebarsConfig = {
         'guides/team-telegram-assistant',
         'guides/python-library',
         'guides/use-mcp-with-hermes',
+        'guides/cursor-mcp',
         'guides/manage-hermes-cloud-with-mcp',
         'guides/use-soul-with-hermes',
         'guides/use-voice-mode-with-hermes',

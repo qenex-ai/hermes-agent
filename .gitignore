@@ -143,9 +143,11 @@ website/static/api/plugins-meta.json
 website/static/api/automation-blueprints-index.json
 models-dev-upstream/
 
-# Local editor / agent tooling (machine-specific; keep in global config, not the repo)
+# Local editor / agent tooling (machine-specific; keep in global config, not the repo).
+# Project MCP servers for this fork are tracked — ignore everything else under .cursor/.
 .codex/
-.cursor/
+.cursor/*
+!.cursor/mcp.json
 .gemini/
 .zed/
 .mcp.json
