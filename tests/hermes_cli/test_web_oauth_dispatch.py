@@ -829,3 +829,33 @@ def test_xai_oauth_start_eafnosupport_message(monkeypatch):
     assert "[Errno 97]" not in detail
 
 
+def test_httpx_call_installs_happy_eyeballs_backend(monkeypatch):
+    """Dashboard OAuth start must race families; IPv4-only retry is not enough on dual-stack hosts."""
+    for name in (
+        "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
+        "https_proxy", "http_proxy", "all_proxy",
+        "NO_PROXY", "no_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    from agent import process_bootstrap
+
+    seen = {"backends": []}
+
+    def _capture(client):
+        transports = [client._transport, *client._mounts.values()]
+        seen["backends"] = [
+            transport._pool._network_backend
+            for transport in transports
+            if transport is not None and hasattr(transport, "_pool")
+        ]
+        return "ok"
+
+    result = asyncio.run(_rt_oauth._httpx_call(_capture))
+    assert result == "ok"
+    assert any(
+        isinstance(backend, process_bootstrap._HappyEyeballsSyncBackend)
+        for backend in seen["backends"]
+    )
+
+

@@ -131,8 +131,10 @@ def _oauth_eafnosupport_detail(exc: BaseException) -> str:
 async def _httpx_call(fn: Callable[[Any], Any], timeout: float = 15.0, **client_kwargs) -> Any:
     """Run ``fn(client)`` off-loop with a short-lived JSON-accepting ``httpx.Client``.
 
-    Prefers IPv4 when the host has no IPv6 sockets; retries once on EAFNOSUPPORT
-    (dashboard xAI/Grok login 500 on Docker/cloud VMs).
+    Dual-stack hosts that advertise AAAA but cannot complete IPv6 connects
+    (EAFNOSUPPORT / ENETUNREACH) used to 500 dashboard OAuth start with the raw
+    errno. Race families per RFC 8305 (same backend as Codex OAuth) and still
+    retry once with force-IPv4 when the host has no IPv6 sockets at all.
     """
     import httpx
     from hermes_constants import apply_ipv4_preference, is_address_family_unsupported
@@ -143,6 +145,9 @@ async def _httpx_call(fn: Callable[[Any], Any], timeout: float = 15.0, **client_
         with httpx.Client(
             timeout=httpx.Timeout(timeout), headers={"Accept": "application/json"}, **client_kwargs
         ) as client:
+            with contextlib.suppress(Exception):
+                from agent.process_bootstrap import enable_happy_eyeballs_on_client
+                enable_happy_eyeballs_on_client(client)
             return fn(client)
 
     loop = asyncio.get_running_loop()

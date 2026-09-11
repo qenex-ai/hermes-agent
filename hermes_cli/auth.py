@@ -73,8 +73,9 @@ from hermes_cli.auth_minimax import (  # noqa: F401  re-exported
 from hermes_cli.auth_xai import (  # noqa: F401  re-exported
     _login_xai_oauth, _read_xai_oauth_tokens, _refresh_xai_oauth_tokens, _save_xai_oauth_tokens,
     _write_through_xai_oauth_to_global_root, _xai_access_token_is_expiring,
-    _xai_oauth_device_code_login, _xai_oauth_discovery, _xai_oauth_poll_device_token,
-    _xai_oauth_request_device_code, _xai_proactive_refresh_skew_seconds,
+    _xai_http_client, _xai_oauth_device_code_login, _xai_oauth_discovery,
+    _xai_oauth_poll_device_token, _xai_oauth_request_device_code,
+    _xai_proactive_refresh_skew_seconds,
     _xai_validate_inference_base_url, refresh_xai_oauth_pure, resolve_xai_oauth_runtime_credentials)
 from hermes_cli.auth_codex import (  # noqa: F401  re-exported
     _codex_access_token_is_expiring, _codex_device_code_login, _codex_http_client,
