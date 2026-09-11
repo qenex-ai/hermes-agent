@@ -115,9 +115,29 @@ def _device_session_started(
     }
 
 
+def _oauth_eafnosupport_detail(exc: BaseException) -> str:
+    """User-facing 500 body when device-code start dies on missing IPv6 sockets."""
+    from hermes_constants import is_address_family_unsupported
+
+    if not is_address_family_unsupported(exc):
+        return str(exc)
+    return (
+        "This host cannot create IPv6 sockets (Address family not supported). "
+        "Outbound login was retried over IPv4 and still failed. Check network "
+        "access to the provider, or set network.force_ipv4: true in config.yaml."
+    )
+
+
 async def _httpx_call(fn: Callable[[Any], Any], timeout: float = 15.0, **client_kwargs) -> Any:
-    """Run ``fn(client)`` off-loop with a short-lived JSON-accepting ``httpx.Client``."""
+    """Run ``fn(client)`` off-loop with a short-lived JSON-accepting ``httpx.Client``.
+
+    Prefers IPv4 when the host has no IPv6 sockets; retries once on EAFNOSUPPORT
+    (dashboard xAI/Grok login 500 on Docker/cloud VMs).
+    """
     import httpx
+    from hermes_constants import apply_ipv4_preference, is_address_family_unsupported
+
+    apply_ipv4_preference()
 
     def _call():
         with httpx.Client(
@@ -125,7 +145,14 @@ async def _httpx_call(fn: Callable[[Any], Any], timeout: float = 15.0, **client_
         ) as client:
             return fn(client)
 
-    return await asyncio.get_running_loop().run_in_executor(None, _call)
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, _call)
+    except Exception as exc:
+        if not is_address_family_unsupported(exc):
+            raise
+        apply_ipv4_preference(force=True)
+        return await loop.run_in_executor(None, _call)
 
 
 # OpenAI Codex device-code worker. Codex's own deviceauth/usercode (returns
@@ -680,7 +707,7 @@ async def start_oauth_login(provider_id: str, request: Request, profile: Optiona
         raise
     except Exception as e:
         _log.exception("oauth/start %s failed", provider_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_oauth_eafnosupport_detail(e))
     raise HTTPException(status_code=400, detail="Unsupported flow")
 
 

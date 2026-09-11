@@ -654,14 +654,15 @@ try:
 except Exception:
     pass  # best-effort — don't crash the CLI if logging setup fails
 
-# Apply IPv4 preference before any HTTP client is created.
-if _FORCE_IPV4_EARLY:
-    try:
-        from hermes_constants import apply_ipv4_preference as _apply_ipv4
+# Apply IPv4 preference before any HTTP client is created. force=True follows
+# network.force_ipv4; force=False still patches when IPv6 sockets are missing
+# (Docker/cloud EAFNOSUPPORT / errno 97 — dashboard xAI OAuth 500).
+try:
+    from hermes_constants import apply_ipv4_preference as _apply_ipv4
 
-        _apply_ipv4(force=True)
-    except Exception:
-        pass  # best-effort — don't crash if hermes_constants not importable yet
+    _apply_ipv4(force=_FORCE_IPV4_EARLY)
+except Exception:
+    pass  # best-effort — don't crash if hermes_constants not importable yet
 
 import logging
 import threading

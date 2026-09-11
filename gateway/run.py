@@ -2043,11 +2043,13 @@ if _config_path.exists():
             file=sys.stderr)
 
 # IPv4 preference must apply before any HTTP clients are created.
+# force=True follows network.force_ipv4; force=False still patches when the
+# host cannot create IPv6 sockets (EAFNOSUPPORT / errno 97).
 try:
     from hermes_constants import apply_ipv4_preference
     _network_cfg = _cfg.get("network", {})
-    if isinstance(_network_cfg, dict) and _network_cfg.get("force_ipv4"):
-        apply_ipv4_preference(force=True)
+    _force_ipv4 = isinstance(_network_cfg, dict) and bool(_network_cfg.get("force_ipv4"))
+    apply_ipv4_preference(force=_force_ipv4)
 except Exception as _bootstrap_exc:
     print(f"  Warning: IPv4 preference application failed: {_bootstrap_exc}", file=sys.stderr)
 
