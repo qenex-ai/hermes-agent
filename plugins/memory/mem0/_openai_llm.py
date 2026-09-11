@@ -38,10 +38,18 @@ class DirectOpenAILLM(OpenAILLM):
         # set); LLMBase still owns validation and supported-parameter filtering.
         LLMBase.__init__(self, config)
         api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
+        base_url = self.config.openai_base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        explicit = (self.config.api_key or "").strip()
+        company = "" if explicit else (os.getenv("OPENAI_API_KEY") or "")
+        api_key = bound_vendor_secret(
+            vendor="openai", company_secret=company, explicit_secret=explicit, target_url=base_url,
+        )
         if not api_key:
             raise ValueError("OpenAI API key is required for the Hermes Mem0 OSS provider")
         from openai import OpenAI
-        self.client = OpenAI(api_key=api_key, base_url=self.config.openai_base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1")
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def generate_response(self, messages: List[Dict[str, str]], response_format=None, tools: Optional[List[Dict]] = None, tool_choice: str = "auto", **kwargs):
         params = self._get_supported_params(messages=messages, **kwargs)

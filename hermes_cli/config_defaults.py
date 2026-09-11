@@ -1646,6 +1646,16 @@ DEFAULT_CONFIG = {
         # enabled (e.g. `elevenlabs`). False = require explicit pip install for everything beyond
         # the base set (restricted/audited/air-gapped environments).
         "allow_lazy_installs": True,
+        # Company metered-aggregator keys (OPENROUTER_API_KEY, …) attach only when the operator
+        # selected that aggregator (or auto / custom / local). Redirected tool/vendor hosts
+        # (FIRECRAWL_API_URL, TAVILY_BASE_URL, STT/TTS base URLs, …) cannot inherit the company
+        # key. Metered web/image/video/browser backends are not auto-selected from key presence.
+        # Child-process env loses company keys when a matching ``*_BASE_URL`` is unofficial.
+        # A hijack that injects OpenRouter as a silent last-rung, aux/vision hop, redirected
+        # ``*_BASE_URL``, or auto-selects a paid tool cannot spend the company wallet; a
+        # requestor-supplied key still attaches — they pay. False restores the historical
+        # fallthrough.
+        "billing_wallet": {"bind_company_keys": True},
     },
 
     "cron": {
@@ -2140,10 +2150,10 @@ DEFAULT_CONFIG = {
         # stay in a git stash). discard = stash and drop after the pull (stash-and-drop, not reset
         # --hard + clean -fd, so ignored paths like node_modules/venv are never touched).
         "non_interactive_local_changes": "stash",
-        # If the checkout is parked on a feature branch and the tree is clean, switch to the update
-        # target (commits stay on the branch; a loud notice names it) so non-interactive updates
-        # keep working. A DIRTY tree blocks the switch and the code update is SKIPPED with a loud
-        # warning. False = never auto-switch.
+        # If the checkout is parked on a feature branch, switch to the update target
+        # (commits stay on the branch; a loud notice names it) so non-interactive
+        # updates keep working. A DIRTY tree is stashed on that branch and the stash
+        # is parked (not restored onto the target). False = never auto-switch.
         "auto_switch_parked_branch": True,
         # Clean parked branch with unmerged commits: switch = move to the update target, commits
         # stay on the branch (never conflicts). update_in_place = for a maintained custom branch:
@@ -2396,6 +2406,21 @@ DEFAULT_CONFIG = {
         "port": 0,  # Port for the managed server. 0 = pick a free port at spawn.
         # Extra ports detection probes for an external llama-server (besides 8080).
         "detect_ports": [],
+    },
+    # Cursor TypeScript SDK (`hermes cursor-sdk`). Secrets stay in .env (CURSOR_API_KEY);
+    # runtime is NEVER defaulted here — the CLI requires explicit --local or --cloud.
+    "cursor_sdk": {
+        "model": "composer-2",
+        "local": {
+            # Empty = do not load ambient Cursor project/user/team settings.
+            "setting_sources": [],
+        },
+        "cloud": {
+            "skip_reviewer_request": True,
+            "auto_create_pr": False,
+            "starting_ref": "main",
+            "repo": "",
+        },
     },
     "_config_version": 42,  # Config schema version - bump this when adding new required fields
 }
@@ -2666,6 +2691,9 @@ OPTIONAL_ENV_VARS = {
         "Airtable API key", "https://airtable.com/create/tokens"),
     "TENOR_API_KEY": _skill("Tenor API key for GIF search (used by the `gif-search` skill)",
         "Tenor API key", "https://developers.google.com/tenor/guides/quickstart"),
+    "CURSOR_API_KEY": _skill(
+        "Cursor API key for the `cursor-sdk` skill (`hermes cursor-sdk`; user or service-account)",
+        "Cursor API key", "https://cursor.com/dashboard/cloud-agents"),
     # ── Honcho ──
     "HONCHO_API_KEY": _tool("Honcho API key for AI-native persistent memory", "Honcho API key",
         "https://app.honcho.dev", tools=["honcho_context"]),

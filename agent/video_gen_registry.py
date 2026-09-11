@@ -3,10 +3,10 @@
 Populated by plugins via ``PluginContext.register_video_gen_provider()``;
 consumed by the ``video_generate`` tool. The active provider is
 ``video_gen.provider`` from ``config.yaml``; a configured-but-unregistered name
-fails closed. If unset, the single *available* registered provider is used
-(mirrors ``agent/image_gen_registry.py`` minus its legacy ``fal`` preference)
-so a box with credentials for only one backend auto-selects it; otherwise None
-and the tool points the user at ``hermes tools``.
+fails closed. If unset, the single *unmetered* available provider is used
+(mirrors ``agent/image_gen_registry.py`` minus its legacy ``fal`` preference).
+A lone metered vendor (DeepInfra, fal, …) is not auto-picked from key presence;
+the tool points the user at ``hermes tools``.
 """
 
 from __future__ import annotations
@@ -39,9 +39,12 @@ def get_active_provider() -> Optional[VideoGenProvider]:
             )
         return provider
 
+    from hermes_cli.billing_wallet import allow_metered_autoselect
+
     available = [
         p for p in snapshot.values()
         if is_available_safe(p, logger, "video_gen provider %s.is_available() raised %s")
+        and allow_metered_autoselect(p.name)
     ]
     return available[0] if len(available) == 1 else None
 

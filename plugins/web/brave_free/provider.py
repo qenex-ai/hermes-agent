@@ -26,10 +26,14 @@ class BraveFreeWebSearchProvider(BaseWebSearchProvider):
 
     def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
         api_key = provider_env("BRAVE_SEARCH_API_KEY")
+        endpoint = provider_env("BRAVE_SEARCH_API_URL") or _BRAVE_ENDPOINT
+        from hermes_cli.billing_wallet import web_company_secret
+
+        api_key = web_company_secret(backend="brave-free", company_secret=api_key or "", target_url=endpoint)
         if not api_key:
             return search_fail("BRAVE_SEARCH_API_KEY is not set")
         data, failure = http_get_json(
-            "Brave Search", _BRAVE_ENDPOINT,
+            "Brave Search", endpoint,
             params={"q": query, "count": max(1, min(int(limit), 20))},  # Brave caps count at 20
             headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
             timeout=15, logger=logger,

@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "hermes": {
+      "command": "hermes",
+      "args": ["mcp", "serve"]
+    },
+    "qenex": {
+      "url": "https://mcp.qenex.ai"
+    },
+    "supabase": {
+      "url": "https://mcp.supabase.com/mcp?project_ref=tmsvyuxaiozmcxdaaqeu&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
+    },
+    "pipedrive": {
+      "url": "https://mcp.pipedrive.ai/mcp"
+    }
+  }
+}

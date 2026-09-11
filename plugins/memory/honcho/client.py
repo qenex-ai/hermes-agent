@@ -256,10 +256,11 @@ def _env_base_url() -> str | None:
 def _connection_fields(look: _HostLookup, host: str, path: Path) -> dict[str, Any]:
     """Resolve identity/credential/transport fields (host block -> root -> env)."""
     raw, host_block = look.raw, look.host
-    api_key = look.pick("apiKey") or get_secret("HONCHO_API_KEY")
+    explicit_key = look.pick("apiKey") or ""
+    company_key = get_secret("HONCHO_API_KEY") or ""
     # Named-profile host blocks do NOT inherit the default host's apiKey (profiles
     # are credential-isolated); the failure is silent 401s, so warn loudly.
-    if not api_key and host_block and host != HOST and _host_block(raw, HOST).get("apiKey"):
+    if not explicit_key and not company_key and host_block and host != HOST and _host_block(raw, HOST).get("apiKey"):
         logger.warning("Honcho host block '%s' has no apiKey; the default '%s' host's key "
                        "is NOT inherited (profiles are credential-isolated). Set apiKey on "
                        "hosts.%s in %s or this profile runs unauthenticated.", host, HOST, host, path)
@@ -269,6 +270,11 @@ def _connection_fields(look: _HostLookup, host: str, path: Path) -> dict[str, An
     native_base_url = endpoint_block.get("baseUrl") if isinstance(endpoint_block, dict) else None
     base_url = _sanitize_url(host_block.get("baseUrl") or host_block.get("base_url") or native_base_url
                              or raw.get("baseUrl") or raw.get("base_url") or _env_base_url())
+    from hermes_cli.billing_wallet import bound_vendor_secret
+    api_key = bound_vendor_secret(
+        vendor="honcho", company_secret=company_key, explicit_secret=explicit_key,
+        target_url=base_url or "",
+    ) or None
     return {
         "workspace_id": look.pick("workspace") or host,
         "ai_peer": look.pick("aiPeer") or host,
@@ -408,8 +414,12 @@ class HonchoClientConfig:
     def from_env(cls, workspace_id: str = "hermes", host: str | None = None) -> HonchoClientConfig:
         """Create config from environment variables (fallback)."""
         resolved_host = host or resolve_active_host()
-        api_key = get_secret("HONCHO_API_KEY")
         base_url = _sanitize_url(_env_base_url())
+        from hermes_cli.billing_wallet import bound_vendor_secret
+        api_key = bound_vendor_secret(
+            vendor="honcho", company_secret=get_secret("HONCHO_API_KEY") or "",
+            target_url=base_url or "",
+        ) or None
         return cls(
             host=resolved_host, workspace_id=workspace_id, api_key=api_key, base_url=base_url,
             environment=os.environ.get("HONCHO_ENVIRONMENT", "production"),
@@ -583,7 +593,16 @@ def _build_client(config: HonchoClientConfig) -> "Honcho":
     # env-sourced key as likely-cloud, substituting the placeholder.
     raw = config.raw or {}
     explicit_key = _host_block(raw, config.host).get("apiKey") or raw.get("apiKey")
-    api_key = "local" if _is_local_base_url(base_url) and not explicit_key else config.api_key
+    if _is_local_base_url(base_url) and not explicit_key:
+        api_key = "local"
+    else:
+        from hermes_cli.billing_wallet import bound_vendor_secret
+        api_key = bound_vendor_secret(
+            vendor="honcho",
+            company_secret="" if explicit_key else (config.api_key or ""),
+            explicit_secret=explicit_key or "",
+            target_url=base_url or "",
+        )
     kwargs: dict = {"workspace_id": config.workspace_id, "api_key": api_key, "environment": config.environment, "timeout": timeout}
     if base_url:
         # The SDK's route builders already carry the version prefix ("/v3/..."), so

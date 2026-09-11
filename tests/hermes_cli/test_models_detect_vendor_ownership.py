@@ -35,5 +35,20 @@ def test_own_vendor_id_stays_when_live_catalog_is_empty(ladder_would_hijack, pro
     ("bedrock", "deepseek-v4-pro"),        # multi-vendor catalog whose non-deepseek ids the
                                            # classifier cannot place: never "exclusively deepseek"
 ])
-def test_non_owned_id_still_remaps_to_keyed_aggregator(ladder_would_hijack, provider, model):
+def test_non_owned_id_does_not_hop_to_aggregator_when_wallet_bound(
+    ladder_would_hijack, provider, model, monkeypatch,
+):
+    """Company OpenRouter key is not consent to remap a native session (#511)."""
+    monkeypatch.setattr("hermes_cli.billing_wallet.billing_wallet_bind_enabled", lambda: True)
+    assert models.detect_provider_for_model(model, provider) is None
+
+
+@pytest.mark.parametrize("provider,model", [
+    ("openai-codex", "claude-opus-4.7"),
+    ("bedrock", "deepseek-v4-pro"),
+])
+def test_non_owned_id_remaps_to_keyed_aggregator_when_wallet_unbound(
+    ladder_would_hijack, provider, model, monkeypatch,
+):
+    monkeypatch.setattr("hermes_cli.billing_wallet.billing_wallet_bind_enabled", lambda: False)
     assert models.detect_provider_for_model(model, provider) == ("openrouter", f"vendor/{model}")

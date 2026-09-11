@@ -104,8 +104,10 @@ def _assess_parked_branch_switch(git_cmd: list[str], cwd: Path, current_branch: 
     - (True, "unmerged:<n>") — tree clean but commits not in target; switching is safe (checkout keeps
       committed work) but caller must print a LOUD notice. Non-interactive callers (desktop, gateway
       /update, cron) can't resolve a skip, so a clean checkout must reach target.
-    - (False, "disabled"|"dirty"|"unverifiable") — caller must NOT touch the branch. Dirty is the
-      genuinely unsafe case: uncommitted work riding an autostash across branches.
+    - (False, "dirty") — uncommitted work is present. The guard must stash it on this branch and
+      *park* the stash (never restore onto the update target); skipping forever is what stranded
+      non-interactive HermesAction/cron retries.
+    - (False, "disabled"|"unverifiable") — caller must NOT touch the branch.
     A config read failure must not disable the safety checks: fall through with the default."""
     from hermes_cli.update_cmd import _git_run
     try:
@@ -168,6 +170,22 @@ def _print_parked_branch_kept_notice(current_branch: str, target_branch: str, un
     )
 
 
+def _print_parked_branch_dirty_notice(current_branch: str, target_branch: str) -> None:
+    """LOUD notice: dirty parked branch will be stashed, switched, stash parked (not restored onto target).
+
+    Restoring the autostash onto *target* would ride uncommitted feature-branch edits onto main —
+    the failure class the original skip guarded. Parking the stash keeps the work and lets
+    non-interactive updates (HermesAction, gateway /update, cron) proceed."""
+    print(
+        f"\n{_BAR}\n"
+        f"⚠ Checkout was parked on '{current_branch}' with uncommitted changes.\n"
+        f"  Stashing them, switching to {target_branch} so the update can proceed,\n"
+        f"  and leaving the stash parked (not re-applied onto {target_branch}).\n\n"
+        f"  To restore the work later:\n"
+        f"    git checkout {current_branch} && git stash apply\n{_BAR}"
+    )
+
+
 OFFICIAL_REPO_URLS = {
     "https://github.com/NousResearch/hermes-agent.git",
     "git@github.com:NousResearch/hermes-agent.git",
@@ -176,11 +194,221 @@ OFFICIAL_REPO_URLS = {
 }
 OFFICIAL_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
+_ORIGIN_URL_CACHE = ".update_origin_url"
+
+
+def _origin_url_looks_fetchable(url: Optional[str]) -> bool:
+    """True when ``url`` is an HTTPS/SSH git URL or a local git repo/bundle.
+
+    A missing ``origin`` remote, an empty URL, or a leftover local path that is
+    not a git repository is what produces git's
+    ``'origin' does not appear to be a git repository``. An existing directory
+    without ``.git`` is not fetchable.
+    """
+    u = (url or "").strip()
+    if not u:
+        return False
+    if u.startswith(("https://", "http://", "git@", "ssh://", "git://", "file://")):
+        return True
+    try:
+        p = Path(u).expanduser()
+        if p.is_file():
+            return True
+        return p.is_dir() and (p / ".git").exists()
+    except Exception:
+        return False
+
+
+def _origin_url_cache_path() -> Path:
+    from hermes_constants import get_hermes_home
+    return get_hermes_home() / _ORIGIN_URL_CACHE
+
+
+def _remember_origin_url(url: str) -> None:
+    """Persist a known-good origin URL so a later wiped-remotes checkout can recover."""
+    u = (url or "").strip()
+    if not _origin_url_looks_fetchable(u):
+        return
+    with suppress(Exception):
+        path = _origin_url_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(u + "\n", encoding="utf-8")
+
+
+def _recalled_origin_url() -> Optional[str]:
+    with suppress(Exception):
+        url = _origin_url_cache_path().read_text(encoding="utf-8").strip().splitlines()[0].strip()
+        if _origin_url_looks_fetchable(url):
+            return url
+    return None
 
 
 def _get_origin_url(git_cmd: list[str], cwd: Path) -> Optional[str]:
-    """Get the URL of the origin remote, or None if not set."""
-    return _git_stdout(git_cmd, ["remote", "get-url", "origin"], cwd)
+    """Stored origin URL (``git config``, not ``get-url`` so insteadOf cannot inject tokens)."""
+    return _git_stdout(git_cmd, ["config", "--get", "remote.origin.url"], cwd) or None
+
+
+def _parse_remote_config_urls(text: str) -> list[tuple[str, str]]:
+    """Parse ``git config --get-regexp '^remote\\..*\\.url$'`` into ``(name, url)`` pairs.
+
+    ``git remote -v`` / ``git remote get-url`` apply ``url.*.insteadOf`` rewrites, which
+    can inject a credential helper's HTTPS token into the displayed URL. Config keys
+    are the stored values — the only thing safe to copy onto ``origin``.
+    """
+    pairs: list[tuple[str, str]] = []
+    for line in (text or "").splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        key, url = parts[0], parts[1].strip()
+        if not url or not key.startswith("remote.") or not key.endswith(".url"):
+            continue
+        name = key[len("remote."):-len(".url")]
+        if name:
+            pairs.append((name, url))
+    return pairs
+
+
+def _candidate_origin_from_remotes(pairs: list[tuple[str, str]]) -> Optional[tuple[str, str]]:
+    """Pick a sibling remote whose URL can be restored as ``origin``. Never invents a URL.
+
+    Prefer a hermes-agent fork (so a Nous ``upstream`` is not promoted over the user's
+    fork), then the sole hermes-agent remote, then ``upstream``, then the only remote.
+    Ambiguous non-hermes remotes return None so the caller prints add-origin instructions.
+    """
+    by_name: dict[str, str] = {}
+    for name, url in pairs:
+        if name == "origin" or not url:
+            continue
+        by_name.setdefault(name, url)
+    if not by_name:
+        return None
+
+    def _is_hermes(url: str) -> bool:
+        return "hermes-agent" in url.lower()
+
+    forks = [(n, u) for n, u in by_name.items() if _is_hermes(u) and _is_fork(u)]
+    if len(forks) == 1:
+        return forks[0]
+    if len(forks) > 1:
+        for preferred in ("fork", "github"):
+            for n, u in forks:
+                if n.lower() == preferred:
+                    return n, u
+        return forks[0]
+    hermes = [(n, u) for n, u in by_name.items() if _is_hermes(u)]
+    if len(hermes) == 1:
+        return hermes[0]
+    if "upstream" in by_name:
+        return "upstream", by_name["upstream"]
+    if len(by_name) == 1:
+        name, url = next(iter(by_name.items()))
+        return name, url
+    return None
+
+
+def _ensure_origin_remote(git_cmd: list[str], cwd: Path, *, force: bool = False) -> Optional[str]:
+    """Return a usable origin URL, restoring the remote when it is missing or unusable.
+
+    Recovery order: sibling remotes (fork over official ``upstream``) → last URL this
+    install successfully used → official Nous repo. A host that wiped every remote
+    otherwise stays stuck forever: it cannot ``git fetch origin``, so it cannot
+    pull the updater fix. ``force=True`` rebuilds origin even when a URL is already
+    set (the fetch just failed with git's missing-origin wording).
+    """
+    from hermes_cli.update_cmd import _m
+    existing = _m()._get_origin_url(git_cmd, cwd)
+    if existing and _origin_url_looks_fetchable(existing) and not force:
+        _remember_origin_url(existing)
+        return existing
+    listed = _git_stdout(git_cmd, ["remote"], cwd) or ""
+    names = {line.strip() for line in listed.splitlines() if line.strip()}
+    pairs = _parse_remote_config_urls(
+        _git_stdout(git_cmd, ["config", "--get-regexp", r"^remote\..*\.url$"], cwd) or ""
+    )
+    sibling_names = {n for n in names if n != "origin"} | {n for n, _ in pairs if n != "origin"}
+    picked = _candidate_origin_from_remotes(pairs)
+    if picked is None:
+        recalled = _recalled_origin_url()
+        if recalled:
+            picked = ("last successful update", recalled)
+        elif existing and _origin_url_looks_fetchable(existing):
+            # Config still has a URL (or force=True after git rejected origin).
+            # Rewrite the remote to that URL — do not return it without add/set-url.
+            picked = ("configured origin URL", existing)
+        elif not sibling_names:
+            # Zero remotes (or origin pointing at garbage): invent official Nous
+            # so `git fetch origin` can unstick. Never guess among leftover
+            # non-hermes remotes.
+            picked = ("official Hermes repository", OFFICIAL_REPO_URL)
+        else:
+            return None
+    source_name, url = picked
+    if "origin" in names:
+        ok = _git_ok(git_cmd, ["remote", "set-url", "origin", url], cwd)
+        action = "reset"
+    else:
+        ok = _git_ok(git_cmd, ["remote", "add", "origin", url], cwd)
+        action = "restored"
+    restored = _git_stdout(git_cmd, ["config", "--get", "remote.origin.url"], cwd)
+    if not ok or not restored:
+        return None
+    label = source_name if " " in source_name else f"'{source_name}'"
+    print(f"  ⚠ No usable 'origin' remote — {action} from {label}:")
+    print(f"    {restored}")
+    if source_name == "official Hermes repository":
+        print("    If this checkout is a fork, point origin back at it:")
+        print("      git remote set-url origin <your-fork-url>")
+    _remember_origin_url(restored)
+    return restored
+
+
+def _fetch_origin_branch(git_cmd, cwd, branch: str, extra_args: Optional[list] = None):
+    """Fetch ``branch`` from origin, restoring origin and fetching by URL if needed.
+
+    ``git fetch origin`` is what production dies on when the remote is gone
+    (``fatal: 'origin' does not appear to be a git repository``). After
+    restore+retry still missing origin, fetch the last-known or official URL
+    directly into ``refs/remotes/origin/<branch>`` — that does not require a
+    working ``origin`` remote — then point origin at that URL.
+    """
+    from hermes_cli.update_cmd import _ensure_origin_remote, _git_run
+
+    extra = list(extra_args or [])
+    _ensure_origin_remote(git_cmd, cwd)
+    result = _git_run(git_cmd, ["fetch", *extra, "origin", branch], cwd, network=True)
+    if result.returncode == 0:
+        return result
+    if not _stderr_is_missing_origin(result.stderr or ""):
+        return result
+    print("→ Origin remote unusable — restoring and retrying fetch...")
+    _ensure_origin_remote(git_cmd, cwd, force=True)
+    result = _git_run(git_cmd, ["fetch", *extra, "origin", branch], cwd, network=True)
+    if result.returncode == 0 or not _stderr_is_missing_origin(result.stderr or ""):
+        return result
+    urls: list[str] = []
+    recalled = _recalled_origin_url()
+    if recalled:
+        urls.append(recalled)
+    if OFFICIAL_REPO_URL not in urls:
+        urls.append(OFFICIAL_REPO_URL)
+    refspec = f"{branch}:refs/remotes/origin/{branch}"
+    last = result
+    for url in urls:
+        print(f"→ Fetching {branch} from {url} (no usable origin remote)...")
+        last = _git_run(git_cmd, ["fetch", *extra, url, refspec], cwd, network=True)
+        if last.returncode != 0:
+            continue
+        listed = _git_stdout(git_cmd, ["remote"], cwd) or ""
+        names = {line.strip() for line in listed.splitlines() if line.strip()}
+        if "origin" in names:
+            _git_ok(git_cmd, ["remote", "set-url", "origin", url], cwd)
+        else:
+            _git_ok(git_cmd, ["remote", "add", "origin", url], cwd)
+        _remember_origin_url(url)
+        print(f"  ✓ origin → {url}")
+        return last
+    return last
 
 
 def _is_fork(origin_url: Optional[str]) -> bool:
@@ -324,11 +552,31 @@ def _has_http_code(stderr: str, *codes: str) -> bool:
 # so rate-limit/outage checks must run BEFORE the generic "unable to access" check. An anonymous fetch
 # answered with HTTP 401 ("could not read Username") is GitHub during an outage (or a renamed/private
 # repo), not a user credentials problem.
+_MISSING_ORIGIN_DIAGNOSIS = (
+    "✗ No git remote named 'origin' — cannot fetch updates."
+)
+_MISSING_ORIGIN_HINT = (
+    "  Add it from the repo this checkout was cloned from, then retry:\n"
+    "    git remote add origin <url>\n"
+    "    hermes update"
+)
+
+
+def _stderr_is_missing_origin(stderr: str) -> bool:
+    """True for git's missing-``origin`` fetch error, not a missing ``upstream``."""
+    s = (stderr or "").lower()
+    if "origin" not in s:
+        return False
+    return "does not appear to be a git repository" in s or "no such remote" in s
+
+
 _FETCH_FAILURE_RULES = (
     (lambda s: _has_http_code(s, "429") or "rate limit" in s.lower(),
      "✗ GitHub is rate limiting requests or having an outage (HTTP 429) — try again in 5 minutes."),
     (lambda s: _has_http_code(s, "500", "502", "503", "504"),
      "✗ GitHub appears to be having an outage — try again in a few minutes (https://www.githubstatus.com)."),
+    (_stderr_is_missing_origin,
+     _MISSING_ORIGIN_DIAGNOSIS),
     (lambda s: "Could not resolve host" in s or "unable to access" in s,
      "✗ Network error — cannot reach the remote repository."),
     (lambda s: "could not read Username" in s or "terminal prompts disabled" in s,
@@ -351,6 +599,8 @@ def _print_fetch_failure(stderr: str) -> None:
     print(_classify_fetch_failure(stderr))
     if stderr:
         print(f"  {stderr.splitlines()[0]}")
+    if _stderr_is_missing_origin(stderr):
+        print(_MISSING_ORIGIN_HINT)
 
 
 def _probe_fork_bomb(argv: list) -> Optional[bool]:

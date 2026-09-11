@@ -382,15 +382,15 @@ class TestLegacyCloudMigration:
         monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
         assert bu_cli.is_browser_use_cli_mode() is False
 
-    def test_auto_detect_with_key_migrates(self, monkeypatch):
-        """No cloud_provider configured + BROWSER_USE_API_KEY set: credential
-        auto-detection prefers Browser Use (even when Browserbase creds are
-        also present), which now means Browser Use mode."""
+    def test_auto_detect_with_key_does_not_migrate(self, monkeypatch):
+        """No cloud_provider configured + BROWSER_USE_API_KEY set: key presence
+        is not consent to spend Browser Use."""
         monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: {})
         monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
         monkeypatch.setenv("BROWSERBASE_API_KEY", "bb-key")
         monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
-        assert bu_cli.is_browser_use_cli_mode() is True
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
+        assert bu_cli.is_browser_use_cli_mode() is False
 
     def test_auto_detect_without_key_does_not_migrate(self, monkeypatch):
         """No key, no CLI: nothing to migrate and no default flip."""

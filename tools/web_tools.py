@@ -109,24 +109,33 @@ def _get_backend() -> str:
         # Selection exists (use_gateway / per-capability keys) but no shared name: firecrawl, no ladder.
         return "firecrawl"
 
-    # Never-configured install. Explicit user credentials beat the managed-gateway probe (a Nous OAuth
-    # token's tier may not grant web access; the gateway then fails at runtime with no fallback).
-    # Free tiers trail paid.
+    # Never-configured install. Key presence is not consent to spend a metered backend
+    # (EXA_API_KEY sitting in .env must not auto-pick Exa). Self-hosted URLs and free
+    # local backends still autodetect. Kill switch: security.billing_wallet.bind_company_keys.
+    from hermes_cli.billing_wallet import allow_metered_autoselect
+
+    if _has_env("FIRECRAWL_API_URL"):
+        return "firecrawl"
+
     backend_candidates = (
         ("tavily", _has_env("TAVILY_API_KEY")), ("perplexity", _has_env("PERPLEXITY_API_KEY")),
         ("exa", _has_env("EXA_API_KEY")),
         ("parallel", _has_env("PARALLEL_API_KEY")), ("keenable", _has_env("KEENABLE_API_KEY")),
-        ("firecrawl", _has_env("FIRECRAWL_API_KEY") or _has_env("FIRECRAWL_API_URL")),
+        ("firecrawl", _has_env("FIRECRAWL_API_KEY")),
         ("firecrawl", _is_tool_gateway_ready()), ("searxng", _has_env("SEARXNG_URL")),
         ("brave-free", _has_env("BRAVE_SEARCH_API_KEY")), ("ddgs", _ddgs_package_importable()),
     )
     for backend, available in backend_candidates:
-        if available:
+        if available and allow_metered_autoselect(backend):
             return backend
 
     # Plugin-contributed providers (built-ins are covered above); probe the held object directly.
     for provider in _list_registered_web_providers():
-        if provider.name not in _LEGACY_WEB_BACKENDS and _probe(provider, "is_available"):
+        if (
+            provider.name not in _LEGACY_WEB_BACKENDS
+            and _probe(provider, "is_available")
+            and allow_metered_autoselect(provider.name)
+        ):
             return provider.name
 
     # Keyless free tier — strictly last so it never pre-empts a keyed backend. Discovery must run

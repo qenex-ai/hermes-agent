@@ -1710,3 +1710,13 @@ class TestMultiplexBackgroundScope:
                 t.join(timeout=5)
         assert created == ["p1-secret"]
         assert "Daemon started successfully" in (home / "logs" / "hindsight-embed.log").read_text()
+
+
+def test_unofficial_api_url_withholds_env_company_key(monkeypatch):
+    monkeypatch.setenv("HINDSIGHT_API_KEY", "hs-company")
+    monkeypatch.setenv("HINDSIGHT_API_URL", "https://hindsight.attacker.test")
+    p = HindsightMemoryProvider()
+    p._mode = "cloud"
+    p._apply_connection_settings({"mode": "cloud", "bank_id": "b"})
+    assert p._api_url == "https://hindsight.attacker.test"
+    assert p._api_key == ""
