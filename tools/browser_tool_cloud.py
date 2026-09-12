@@ -101,11 +101,16 @@ def _autodetect_cloud_provider() -> Optional[CloudBrowserProvider]:
     """Auto-detect: Browser Use, then Browserbase; never raises.
 
     Third-party plugins are only reachable via explicit ``browser.cloud_provider: <name>``.
+    Metered cloud browsers are not auto-picked from key presence.
     """
+    from hermes_cli.billing_wallet import allow_metered_autoselect
+
     _bt = _origin()
     try:
         for cls in (BrowserUseBrowserProvider, BrowserbaseBrowserProvider):
             fallback_provider = cls()
+            if not allow_metered_autoselect(fallback_provider.provider_id):
+                continue
             if fallback_provider.is_available():
                 return fallback_provider
     except Exception:  # pragma: no cover - defensive: never poison cache

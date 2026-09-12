@@ -4,6 +4,7 @@ Import-safe, stdlib-only — importable from anywhere without circular-import ri
 """
 
 import contextlib
+import errno
 import os
 import re
 import shutil
@@ -1126,13 +1127,76 @@ def get_env_path() -> Path:
     return get_hermes_home() / ".env"
 
 
-def apply_ipv4_preference(force: bool = False) -> None:
-    """Monkey-patch ``socket.getaddrinfo`` to prefer IPv4 when *force* is True.
+_IPV6_SOCKETS_SUPPORTED: bool | None = None
 
-    Broken-IPv6 hosts hang on AAAA for the full TCP timeout; ``AF_UNSPEC`` resolves as ``AF_INET``,
-    falling back to full resolution when no A record exists (pure-IPv6 hosts still work).
+# Linux EAFNOSUPPORT is 97; Windows WSAEAFNOSUPPORT is 10047. Named constants
+# are missing on the other OS, so the numeric fallbacks stay in the set.
+_ADDRESS_FAMILY_UNSUPPORTED_ERRNOS: frozenset[int] = frozenset(
+    n
+    for n in (
+        getattr(errno, "EAFNOSUPPORT", None),
+        getattr(errno, "EPROTONOSUPPORT", None),
+        getattr(errno, "EPFNOSUPPORT", None),
+        getattr(errno, "WSAEAFNOSUPPORT", None),
+        97,
+        10047,
+    )
+    if isinstance(n, int)
+)
+
+
+def is_address_family_unsupported(exc: BaseException) -> bool:
+    """True when *exc* (or a wrapped cause) is EAFNOSUPPORT / errno 97.
+
+    Docker and cloud VMs often disable IPv6 in the kernel. httpx still follows
+    AAAA and the connect fails instead of falling back to IPv4.
     """
-    if not force:
+    cur: BaseException | None = exc
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, OSError) and cur.errno in _ADDRESS_FAMILY_UNSUPPORTED_ERRNOS:
+            return True
+        msg = str(cur)
+        if "Address family not supported" in msg or "[Errno 97]" in msg or "[WinError 10047]" in msg:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
+def ipv6_sockets_supported() -> bool:
+    """True when this host can create an AF_INET6 TCP socket.
+
+    ``socket.has_ipv6`` is a compile-time flag and stays True on kernels that
+    refuse IPv6 at runtime. Probe the socket; cache only a definitive answer.
+    Transient errors (EMFILE) are treated as supported and not cached.
+    """
+    global _IPV6_SOCKETS_SUPPORTED
+    if _IPV6_SOCKETS_SUPPORTED is not None:
+        return _IPV6_SOCKETS_SUPPORTED
+    import socket
+
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    except OSError as exc:
+        if exc.errno in _ADDRESS_FAMILY_UNSUPPORTED_ERRNOS:
+            _IPV6_SOCKETS_SUPPORTED = False
+            return False
+        return True
+    sock.close()
+    _IPV6_SOCKETS_SUPPORTED = True
+    return True
+
+
+def apply_ipv4_preference(force: bool = False) -> None:
+    """Monkey-patch ``socket.getaddrinfo`` to prefer IPv4.
+
+    *force* is the ``network.force_ipv4`` config path (broken IPv6 *routing*).
+    With *force* false, still patch when IPv6 sockets cannot be created
+    (EAFNOSUPPORT). ``AF_UNSPEC`` resolves as ``AF_INET``, falling back to full
+    resolution when no A record exists so pure-IPv6 hosts still work.
+    """
+    if not force and ipv6_sockets_supported():
         return
 
     import socket

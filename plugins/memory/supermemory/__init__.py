@@ -375,7 +375,13 @@ class SupermemoryMemoryProvider(MemoryProvider):
         self._hermes_home = kwargs.get("hermes_home") or str(get_hermes_home())
         self._session_id, self._turn_count, self._session_turns = session_id, 0, []
         config = _load_supermemory_config(self._hermes_home)
-        self._api_key = get_secret("SUPERMEMORY_API_KEY", "") or ""
+        from hermes_cli.billing_wallet import bound_vendor_secret
+        base_url = _resolve_base_url(config["base_url"])
+        self._api_key = bound_vendor_secret(
+            vendor="supermemory",
+            company_secret=get_secret("SUPERMEMORY_API_KEY", "") or "",
+            target_url=base_url,
+        )
         self._container_tag = _resolve_container_tag(config["container_tag"], kwargs.get("agent_identity", "default"))
         self._apply_config(config)
         self._write_enabled = kwargs.get("agent_context", "") not in {"cron", "flush", "subagent"}

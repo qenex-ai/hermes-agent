@@ -709,10 +709,17 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _apply_connection_settings(self, cfg: dict) -> None:
         """Endpoint, bank and mode selectors from *cfg* (env fallbacks where documented)."""
-        self._api_key = _cloud_api_key(cfg)
         default_url = _DEFAULT_LOCAL_URL if self._mode in {"local_embedded", "local_external"} else _DEFAULT_API_URL
         self._api_url = cfg.get("api_url") or get_secret("HINDSIGHT_API_URL", "") or default_url
         self._llm_base_url = cfg.get("llm_base_url", "")
+        from hermes_cli.billing_wallet import bound_vendor_secret
+        explicit = str(cfg.get("apiKey") or cfg.get("api_key") or "").strip()
+        self._api_key = bound_vendor_secret(
+            vendor="hindsight",
+            company_secret="" if explicit else (get_secret("HINDSIGHT_API_KEY", "") or ""),
+            explicit_secret=explicit,
+            target_url=self._api_url or "",
+        )
 
         banks = cfg_get(cfg, "banks", "hermes", default={})
         self._bank_id_template = cfg.get("bank_id_template", "") or ""

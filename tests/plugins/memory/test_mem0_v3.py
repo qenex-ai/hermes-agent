@@ -478,7 +478,8 @@ class TestCreateBackendRouting:
         provider = self._provider(monkeypatch, host="http://sh:8888", api_key="adminkey")
         backend = provider._create_backend()
         assert isinstance(backend, SH)
-        assert captured["args"] == ("adminkey", "http://sh:8888")
+        assert captured["args"][1] == "http://sh:8888"
+        assert captured["args"][0] == ""
 
 
     def test_oss_mode_takes_precedence_over_host(self, monkeypatch):
@@ -489,6 +490,19 @@ class TestCreateBackendRouting:
         monkeypatch.setattr("plugins.memory.mem0._backend.OSSBackend", OB)
         provider = self._provider(monkeypatch, mode="oss", host="http://sh:8888")
         assert isinstance(provider._create_backend(), OB)
+
+    def test_selfhosted_official_host_keeps_company_key(self, monkeypatch):
+        captured = {}
+
+        class SH(_SentinelBackend):
+            def __init__(self, api_key, host):
+                captured["args"] = (api_key, host)
+
+        monkeypatch.setattr("plugins.memory.mem0._backend.SelfHostedBackend", SH)
+        provider = self._provider(monkeypatch, host="https://api.mem0.ai", api_key="adminkey")
+        backend = provider._create_backend()
+        assert isinstance(backend, SH)
+        assert captured["args"] == ("adminkey", "https://api.mem0.ai")
 
     def test_prompt_label_matches_routing_when_oss_and_host_both_set(self, monkeypatch):
         # system_prompt_block must mirror _create_backend precedence: with both

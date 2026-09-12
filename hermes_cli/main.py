@@ -330,6 +330,8 @@ from hermes_cli.subcommands.logout import build_logout_parser
 from hermes_cli.subcommands.auth import build_auth_parser
 from hermes_cli.subcommands.status import build_status_parser
 from hermes_cli.subcommands.pause import build_pause_parser
+from hermes_cli.subcommands.qenex import build_qenex_parser
+from hermes_cli.subcommands.cursor_sdk import build_cursor_sdk_parser
 from hermes_cli.subcommands.webhook import build_webhook_parser
 from hermes_cli.subcommands.hooks import build_hooks_parser
 from hermes_cli.subcommands.doctor import build_doctor_parser
@@ -651,14 +653,15 @@ try:
 except Exception:
     pass  # best-effort — don't crash the CLI if logging setup fails
 
-# Apply IPv4 preference before any HTTP client is created.
-if _FORCE_IPV4_EARLY:
-    try:
-        from hermes_constants import apply_ipv4_preference as _apply_ipv4
+# Apply IPv4 preference before any HTTP client is created. force=True follows
+# network.force_ipv4; force=False still patches when IPv6 sockets are missing
+# (Docker/cloud EAFNOSUPPORT / errno 97 — dashboard xAI OAuth 500).
+try:
+    from hermes_constants import apply_ipv4_preference as _apply_ipv4
 
-        _apply_ipv4(force=True)
-    except Exception:
-        pass  # best-effort — don't crash if hermes_constants not importable yet
+    _apply_ipv4(force=_FORCE_IPV4_EARLY)
+except Exception:
+    pass  # best-effort — don't crash if hermes_constants not importable yet
 
 import logging
 import threading
@@ -2057,11 +2060,14 @@ _FROZEN_UPDATER_SURFACE: dict[str, tuple[str, ...]] = {
         "_cold_start_windows_gateway_after_update", "_defer_update_for_self_lock",
         "_dependency_sync_would_rewrite", "_detect_self_loaded_native_modules",
         "_detect_venv_python_processes", "_discard_stashed_changes",
+        "_ensure_origin_remote",
+        "_fetch_origin_branch",
         "_filter_non_gateway_concurrent_instances", "_fleet_probe_expected_runtimes",
         "_get_origin_url", "_handoff_reapable_backend_pids", "_ledger_manual_serve_holders",
         "_ledger_reapable_backend_pids", "_leftover_pausable_gateway_pids", "_npm_lockfile_changed",
         "_orphaned_desktop_backend_pids", "_park_stashed_changes",
-        "_pause_windows_gateways_for_update", "_print_parked_branch_kept_notice",
+        "_pause_windows_gateways_for_update", "_print_parked_branch_dirty_notice",
+        "_print_parked_branch_kept_notice",
         "_print_parked_branch_skip_warning", "_purge_stale_hermes_modules",
         "_refresh_active_lazy_features", "_refresh_active_memory_provider_dependencies",
         "_refresh_bootstrap_cache_scripts", "_refresh_windows_gateway_launchers",
@@ -2640,6 +2646,8 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "model", "monitoring", "pairing", "pause", "peer", "pets", "plugins", "portal", "profile",
         "project", "proxy",
         "prompt-size",
+        "qenex",
+        "cursor-sdk",
         "resume",
         "send", "sessions", "setup",
         "skin", "skills", "slack", "status", "sync", "tools", "uninstall", "update",
@@ -3239,6 +3247,8 @@ def _build_cli_parser():
     build_auth_parser(subparsers, cmd_auth=cmd_auth)
     build_status_parser(subparsers, cmd_status=cmd_status)
     build_pause_parser(subparsers)
+    build_qenex_parser(subparsers)
+    build_cursor_sdk_parser(subparsers)
     build_cron_parser(subparsers, cmd_cron=cmd_cron)
     build_sync_parser(subparsers, cmd_sync=cmd_sync)
     build_webhook_parser(subparsers, cmd_webhook=cmd_webhook)

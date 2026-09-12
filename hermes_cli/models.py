@@ -960,7 +960,11 @@ def detect_provider_for_model(
     Never hands back a provider the user holds no credentials for: an unauthenticated guess is
     skipped and the ladder continues (``None`` = stay on the current provider). Exceptions: the user
     NAMED the provider (``/model nous``), or there is no current provider yet (``auto``) — then the
-    first guess is returned so the credential step fails loudly instead of silently ignoring input."""
+    first guess is returned so the credential step fails loudly instead of silently ignoring input.
+
+    Metered aggregators (OpenRouter, AI Gateway, Kilo Code) are not auto-hops even when the
+    company holds a key — having ``OPENROUTER_API_KEY`` is not consent to be switched onto it."""
+    from hermes_cli.billing_wallet import allow_aggregator_auto_switch
     from hermes_cli.models_detect import (
         current_provider_catalog_match, current_provider_owns_vendor, provider_has_credentials)
 
@@ -980,12 +984,23 @@ def detect_provider_for_model(
         return None
 
     no_selection = (current_provider or "").strip().lower() in {"", "auto"}
+    named = _PROVIDER_ALIASES.get(name.lower(), name.lower())
     for candidate in _detection_candidates(name, current_provider):
         if candidate is None:
             return None  # the current catalog owns this name
+        if not allow_aggregator_auto_switch(
+            model_name=name, current_provider=current_provider, target_provider=candidate[0],
+        ):
+            if named == candidate[0]:
+                return candidate  # explicitly named aggregator: credential step reports it
+            logger.debug(
+                "Skipping aggregator auto-switch of '%s' to %s (billing-wallet bind)",
+                name, candidate[0],
+            )
+            continue
         if no_selection or candidate[0] == current_provider or provider_has_credentials(candidate[0]):
             return candidate
-        if _PROVIDER_ALIASES.get(name.lower(), name.lower()) == candidate[0]:
+        if named == candidate[0]:
             return candidate  # explicitly named provider: let the credential step report it
         logger.debug("Skipping auto-switch of '%s' to %s: no credentials configured", name, candidate[0])
     # A ``vendor/model`` prefix naming a provider the user DECLARED in ``providers:`` is a selection,

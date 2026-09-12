@@ -188,7 +188,7 @@ updates:
   pre_update_backup: quick       # quick (state snapshot, default) | full (snapshot + HERMES_HOME zip) | off
   backup_keep: 5                 # Keep this many full pre-update backup zips
   non_interactive_local_changes: stash  # stash | discard
-  auto_switch_parked_branch: true       # auto-switch a clean, fully merged parked branch back to main
+  auto_switch_parked_branch: true       # auto-switch a parked branch back to main (dirty trees are stashed and parked)
 ```
 
 `pre_update_backup` is the single pre-update safety knob: `quick` (default) snapshots critical state files (pairing data, cron jobs, config, auth; files over 1 GiB are skipped) into `state-snapshots/`; `full` additionally zips all of `HERMES_HOME` into `backups/` and can add minutes on large homes; `off` disables both. Legacy booleans are honored (`true` → `full`, `false` → `off`).
@@ -2804,7 +2804,7 @@ network:
   force_ipv4: false   # Force IPv4 for outbound connections (default: false)
 ```
 
-`force_ipv4` — on servers with broken or unreachable IPv6, Python resolves AAAA records first and can hang for the full TCP timeout before falling back to IPv4. Set this to `true` to skip IPv6 entirely and connect over IPv4 directly.
+`force_ipv4` — on servers with broken or unreachable IPv6, Python resolves AAAA records first and can hang for the full TCP timeout before falling back to IPv4. Set this to `true` to skip IPv6 entirely and connect over IPv4 directly. Hosts that cannot create IPv6 sockets at all (`[Errno 97] Address family not supported by protocol`, common in Docker/cloud VMs) auto-prefer IPv4 even when this stays `false`, so dashboard provider login (including xAI Grok OAuth) does not 500.
 
 ## Onboarding
 

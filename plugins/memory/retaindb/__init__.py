@@ -337,7 +337,13 @@ class RetainDBMemoryProvider(MemoryProvider):
         if not project:
             profile_name = os.path.basename(str(kwargs.get("hermes_home", "")))
             project = f"hermes-{profile_name}" if profile_name not in {"", ".hermes"} else "default"
-        self._client = _Client(get_secret("RETAINDB_API_KEY", "") or "", base_url, project)
+        from hermes_cli.billing_wallet import bound_vendor_secret
+        api_key = bound_vendor_secret(
+            vendor="retaindb",
+            company_secret=get_secret("RETAINDB_API_KEY", "") or "",
+            target_url=base_url,
+        )
+        self._client = _Client(api_key, base_url, project)
         self._session_id, self._user_id = session_id, kwargs.get("user_id", "default") or "default"
         self._agent_id = kwargs.get("agent_id", "hermes") or "hermes"
         from hermes_constants import get_hermes_home

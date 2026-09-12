@@ -149,7 +149,16 @@ def _hosted_ocr_config() -> tuple:
     key. The key is a profile credential: read through the secret scope so a multiplexed
     secondary never spends (or reveals its documents to) the default profile's Firecrawl key."""
     from agent.secret_scope import get_secret
+    from hermes_cli.billing_wallet import bound_vendor_secret
+
     api_key = get_secret("FIRECRAWL_API_KEY") or None
+    # Wallet host-check only; hosted OCR always returns api_url=None (anydoc defaults
+    # to api.firecrawl.dev). A redirected FIRECRAWL_API_URL must not inherit the company key.
+    wallet_url = (get_secret("FIRECRAWL_API_URL") or "").strip()
+    if api_key:
+        api_key = bound_vendor_secret(
+            vendor="firecrawl", company_secret=api_key, target_url=wallet_url,
+        ) or None
     enabled = api_key is not None
     with contextlib.suppress(Exception):
         from hermes_cli.config import load_config_readonly

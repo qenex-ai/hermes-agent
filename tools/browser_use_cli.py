@@ -196,7 +196,10 @@ def is_legacy_browser_use_cloud_config(browser_cfg: dict) -> bool:
     if not isinstance(browser_cfg, dict) or browser_cfg.get("backend"):
         return False
     provider = str(browser_cfg.get("cloud_provider") or "").strip().lower()
-    if provider not in {"browser-use", ""} or _use_gateway(browser_cfg) or _camofox_active(" during migration"):
+    # Explicit ``cloud_provider: browser-use`` is the operator pick of the pre-CLI
+    # cloud config. An unused BROWSER_USE_API_KEY with cloud_provider unset is not
+    # consent to migrate onto Browser Use.
+    if provider != "browser-use" or _use_gateway(browser_cfg) or _camofox_active(" during migration"):
         return False
     # Profile credential: a multiplexed secondary must not inherit the default's cloud mode.
     from agent.secret_scope import get_secret

@@ -39,6 +39,14 @@ class TestBraveFreeProviderIsConfigured:
 
 
 class TestBraveFreeProviderSearch:
+    @pytest.fixture(autouse=True)
+    def _operator_selected_brave(self, monkeypatch):
+        """These tests drive Brave.search() as if ``hermes tools`` picked it."""
+        monkeypatch.setattr(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name in {"brave-free", "brave"},
+        )
+
     _SAMPLE_RESPONSE = {
         "web": {
             "results": [
@@ -125,8 +133,8 @@ class TestBraveFreeBackendWiring:
         assert _is_backend_available("brave-free") is True
 
 
-    def test_brave_free_does_not_override_paid_provider(self, monkeypatch):
-        """Exa (higher priority) should win in auto-detect."""
+    def test_brave_free_does_not_autoselect_over_or_from_exa_key(self, monkeypatch):
+        """Unused EXA_API_KEY / BRAVE_SEARCH_API_KEY must not auto-pick a paid backend."""
         from tools import web_tools
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
         for key in ("FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "PARALLEL_API_KEY", "EXA_API_KEY", "SEARXNG_URL"):
@@ -134,7 +142,9 @@ class TestBraveFreeBackendWiring:
         monkeypatch.setenv("EXA_API_KEY", "exa_test")
         monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "BSAkey123")
         monkeypatch.setattr(web_tools, "_is_tool_gateway_ready", lambda: False)
-        assert web_tools._get_backend() == "exa"
+        monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: False)
+        monkeypatch.setattr("agent.web_search_registry._keyless_tier_enabled", lambda: False)
+        assert web_tools._get_backend() not in {"exa", "brave-free"}
 
     def test_check_web_api_key_true_when_brave_free_configured(self, monkeypatch):
         from tools import web_tools

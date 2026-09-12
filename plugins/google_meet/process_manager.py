@@ -80,13 +80,30 @@ def start(url: str, *, out_dir: Optional[Path] = None, headed: bool = False,
         (realtime_instructions, "HERMES_MEET_REALTIME_INSTRUCTIONS")):
         if value:
             env[var] = value
+    from hermes_cli.billing_wallet import bind_child_env, bound_vendor_secret
+
+    realtime_url = (
+        os.environ.get("OPENAI_REALTIME_URL")
+        or os.environ.get("OPENAI_BASE_URL")
+        or "wss://api.openai.com/v1/realtime"
+    )
     # Resolve the realtime key at SPAWN time in the parent, where the profile secret scope
     # (a contextvar) is installed; the detached child inherits env, not scope.
     if not realtime_api_key:
         from agent.secret_scope import get_secret
-        realtime_api_key = get_secret("HERMES_MEET_REALTIME_KEY") or get_secret("OPENAI_API_KEY")
+        company = get_secret("HERMES_MEET_REALTIME_KEY") or get_secret("OPENAI_API_KEY") or ""
+        realtime_api_key = bound_vendor_secret(
+            vendor="openai", company_secret=company, target_url=realtime_url,
+        )
+    else:
+        realtime_api_key = bound_vendor_secret(
+            vendor="openai", company_secret="", explicit_secret=realtime_api_key,
+            target_url=realtime_url,
+        )
+    env = bind_child_env(env)
     if realtime_api_key:
         env["HERMES_MEET_REALTIME_KEY"] = realtime_api_key
+        env["OPENAI_REALTIME_URL"] = realtime_url
     log_path = out / "bot.log"
     # Detach: stdout/stderr → log file, new session so parent signals don't propagate.
     with open(log_path, "ab", buffering=0) as log_fh:

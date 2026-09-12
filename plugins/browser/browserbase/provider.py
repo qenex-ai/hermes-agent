@@ -41,15 +41,21 @@ class BrowserbaseBrowserProvider(CloudBrowserProvider):
     ]
 
     def _get_config_or_none(self) -> Optional[Dict[str, Any]]:
-        api_key = get_secret("BROWSERBASE_API_KEY")
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        # Per-profile like the key: the scoped key must not be sent to the default profile's endpoint.
+        base_url = (get_secret("BROWSERBASE_BASE_URL", "") or "https://api.browserbase.com").rstrip("/")
+        api_key = bound_vendor_secret(
+            vendor="browserbase", company_secret=get_secret("BROWSERBASE_API_KEY") or "",
+            target_url=base_url,
+        )
         project_id = get_secret("BROWSERBASE_PROJECT_ID")
         if not (api_key and project_id):
             return None
         return {
             "api_key": api_key,
             "project_id": project_id,
-            # Per-profile like the key: the scoped key must not be sent to the default profile's endpoint.
-            "base_url": (get_secret("BROWSERBASE_BASE_URL", "") or "https://api.browserbase.com").rstrip("/"),
+            "base_url": base_url,
         }
 
     def _headers(self, config: Dict[str, Any]) -> Dict[str, str]:

@@ -273,7 +273,12 @@ def _finalize_child_env(env: dict) -> dict:
     _strip_hermes_owned_pythonpath_and_runtime_markers(env)
     _apply_windows_msys_bash_env_defaults(env)
     from agent.delegation_context import delegated_child_subprocess_env
-    return delegated_child_subprocess_env(env)
+    env = delegated_child_subprocess_env(env)
+    try:
+        from hermes_cli.billing_wallet import bind_child_env
+        return bind_child_env(env)
+    except Exception:
+        return env
 
 
 def _scrubbed_env(parts, plugin_strip: frozenset, fix_path) -> dict:
