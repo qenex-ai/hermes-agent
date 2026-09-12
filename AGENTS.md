@@ -7,6 +7,94 @@ past that); see the **routing table** at the end and read the area file before e
 
 **Never give up on the right solution.**
 
+## Agent Quick Reference
+
+Operational commands verified against `pyproject.toml`, root `package.json`, and
+`.github/workflows/`. Prefer these over guessing.
+
+| | |
+|---|---|
+| **Python** | 3.11–3.13 (`requires-python = ">=3.11,<3.14"`; `.python-version` pins 3.11) |
+| **Node** | 26 (`.nvmrc`; root `engines`: `^22.22 \|\| ^24.11 \|\| >=26`) |
+| **Package mgr** | **uv** (Python), **npm** workspaces (JS) |
+| **User state** | `get_hermes_home()` → `config.yaml`, `.env` (secrets only), `logs/` |
+
+### Bootstrap (from repo root)
+
+```bash
+# Cloud Agent / fresh clone — matches scripts/cloud-agent-install.sh + CI test venv
+uv sync --frozen --python 3.11 --extra all --extra dev \
+  --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
+source .venv/bin/activate
+
+# JS (dashboard + workspaces); CI uses npm ci at repo root
+npm ci
+npm install --workspace web --no-save && npm run --workspace web build   # dashboard → hermes_cli/web_dist
+```
+
+Manual clone without the cloud script: same `uv sync` line (use `--locked` instead of
+`--frozen` when developing on `pyproject.toml`; run `uv lock` after dependency edits).
+See `CONTRIBUTING.md` for the standard installer path (`~/.hermes/hermes-agent`).
+
+### Run locally
+
+```bash
+hermes doctor                    # after venv + ~/.hermes config
+hermes chat -q "Hello"           # one-shot CLI chat
+python run_agent.py --help       # programmatic entry (AIAgent facade)
+hermes dashboard                 # FastAPI dashboard (needs web_dist build)
+hermes --tui                     # Ink TUI (needs ui-tui build for full UX)
+```
+
+### Python tests (always use the wrapper)
+
+```bash
+scripts/run_tests.sh                              # full suite — CI parity
+scripts/run_tests.sh tests/gateway/               # one directory
+scripts/run_tests.sh tests/foo.py -k test_name    # file + -k filter
+scripts/run_tests.sh -j 4                         # cap parallel file workers
+```
+
+Never bare `pytest` for pre-PR validation. The wrapper sets `TZ=UTC`, `LANG=C.UTF-8`,
+isolates `HERMES_HOME`, blanks credential env vars, and runs **one subprocess per test
+file** via `scripts/run_tests_parallel.py`.
+
+### Python lint & static guards (CI-blocking subset)
+
+```bash
+ruff check .                           # blocking: PLW1514 + ASYNC210/220/221/251
+ty check                               # advisory in CI diff; run locally before large typing changes
+python scripts/check-windows-footguns.py --all
+python scripts/check_compat_pointers.py   # in-tree must not import PLUGIN-COMPAT shims
+```
+
+After `pyproject.toml` dependency changes: `uv lock` (commit `uv.lock`; CI runs
+`uv-lockfile-check.yml`).
+
+### JavaScript / TypeScript (per workspace)
+
+CI runs every workspace `check:*` script in parallel (`js-tests.yml`). Locally:
+
+```bash
+npm ci
+npm run check                        # all workspaces (serial; stops at first failure)
+npm run --workspace web check        # dashboard: tsc + vitest + eslint
+npm run --workspace ui-tui check     # TUI: build:ink + tsc + vitest + eslint
+npm run --workspace apps/desktop check   # heaviest — lint + vitest + platform suites
+npm run --workspace tests-js check   # shared JS contract tests
+```
+
+### Pitfalls that waste agent time
+
+- Hardcoding `~/.hermes` — use `get_hermes_home()` / `display_hermes_home()`.
+- Patching the defining module when production imports from a **facade** — patch where bound.
+- New core tools when terminal + file (or a skill) already suffice — see Footprint Ladder.
+- Tests that read source files as strings, or freeze catalog counts — banned (see Testing).
+- `HERMES_*` env vars for non-secret config — belongs in `config.yaml`.
+- Inferring gateway/desktop identity from argv substrings — use canonical matchers in
+  `hermes_cli/AGENTS.md`.
+
 ## What Hermes Is
 
 Hermes is a personal AI agent that runs the same agent core across a CLI, a messaging
@@ -172,15 +260,20 @@ session-scoped. Assert the GUI session gets the tool **with the env var absent**
 
 ## Development Environment
 
+Activate the project venv before any Python work:
+
 ```bash
 source .venv/bin/activate   # or: source venv/bin/activate
 ```
-`scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
-(worktrees sharing the main checkout's venv).
 
-Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --frozen`
-into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
-script; per-boot services belong in the environment `start` command or `terminals`.
+`scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
+(worktrees sharing the main checkout's venv) and **requires pytest installed** in the chosen
+venv (a release venv without dev extras is skipped).
+
+Full bootstrap, test, and lint commands: **Agent Quick Reference** above. Cursor Cloud
+bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --frozen` into `.venv`,
+Node via nvm, `web` dashboard build). Do not put a foreground server in that script; per-boot
+services belong in the environment `start` command or `terminals`.
 
 ## Project Structure
 
@@ -214,7 +307,7 @@ hermes-agent/
 ├── evals/                # Offline benchmarks (codebase_navigability/, compaction/, ...)
 ├── scripts/              # run_tests.sh, release.py, check_compat_pointers.py, ci/
 ├── website/              # Docusaurus docs (developer-guide/ holds the long-form area docs)
-└── tests/                # Pytest suite (~39k tests / ~3.7k files, Sep 2026)
+└── tests/                # Pytest suite (~39k tests / ~4.1k files, Sep 2026)
 ```
 
 **User state:** `~/.hermes/config.yaml` (settings), `~/.hermes/.env` (secrets only),
