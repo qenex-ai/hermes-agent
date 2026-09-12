@@ -7,6 +7,96 @@ past that); see the **routing table** at the end and read the area file before e
 
 **Never give up on the right solution.**
 
+## Quick Reference
+
+Hermes Agent monorepo (Python agent core + JS workspaces). **Read the area
+`AGENTS.md` before editing** (routing table at the bottom).
+
+| | |
+|---|---|
+| **Python** | 3.11 (`.python-version`; `requires-python = ">=3.11,<3.14"`) |
+| **Node** | 26 (`.nvmrc`; root `package.json` `engines`: `^22.22 \|\| ^24.11 \|\| >=26`) |
+| **Package mgr** | `uv` + `uv.lock` (Python); `npm` workspaces + `package-lock.json` (JS) |
+| **User state** | `~/.hermes/config.yaml`, `~/.hermes/.env` (secrets only), profile-aware via `get_hermes_home()` |
+
+### First-time setup
+
+```bash
+# Cursor Cloud / fresh clone — idempotent bootstrap (venv, Node, web dashboard build)
+scripts/cloud-agent-install.sh
+
+# Manual (matches CI test job in .github/workflows/tests.yml)
+uv sync --locked --python 3.11 \
+  --extra all --extra dev \
+  --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
+source .venv/bin/activate
+
+# JS workspaces (root lockfile; required for dashboard/TUI/desktop checks)
+npm ci
+```
+
+Contributor install via the standard installer: see `CONTRIBUTING.md` § Development Setup.
+
+### Run / dev
+
+```bash
+source .venv/bin/activate
+hermes doctor                          # sanity check
+hermes chat -q "Hello"                 # one-shot chat
+hermes --tui                           # Ink TUI (needs ui-tui build for some paths)
+hermes dashboard                       # FastAPI + embedded TUI (needs web build)
+npm run --workspace web dev            # dashboard SPA dev server
+npm run --workspace apps/desktop dev   # Electron desktop (from repo root)
+```
+
+### Test (always use the wrapper — never bare `pytest` on the full suite)
+
+```bash
+scripts/run_tests.sh                                    # full suite (CI parity)
+scripts/run_tests.sh tests/gateway/                     # one directory
+scripts/run_tests.sh tests/agent/test_foo.py -k test_x  # file + -k filter
+scripts/run_tests.sh -v --tb=long                       # pytest flags pass through
+```
+
+### Lint & static analysis (Python)
+
+```bash
+source .venv/bin/activate
+ruff check .                           # blocking in CI (PLW1514 + select rules)
+ty check                               # advisory diff in CI; run locally before large PRs
+python scripts/check-windows-footguns.py --all   # blocking
+python scripts/check_compat_pointers.py          # blocking — no in-tree compat imports
+```
+
+After `pyproject.toml` / dependency changes: `uv lock` and commit `uv.lock`.
+CI also runs `uv-lockfile-check.yml` on lockfile drift.
+
+### Lint & checks (JavaScript / TypeScript)
+
+```bash
+npm ci                                 # once, from repo root
+node .github/scripts/run-workspace-checks.mjs   # what js-tests.yml runs (all workspaces)
+npm run check                          # shorthand: every workspace's `check` script
+npm run --workspace web check          # one workspace: typecheck + vitest + eslint
+```
+
+Per-workspace `check` scripts vary (`web`: `typecheck && test && lint`; `ui-tui` also
+builds Ink first). Desktop has the heaviest chain — see `apps/desktop/package.json`.
+
+### Common pitfalls (save a turn)
+
+- **`scripts/run_tests.sh` only** for Python tests — sets `HERMES_HOME` temp dir, unsets
+  credential env vars, per-file subprocess isolation.
+- **Never hardcode `~/.hermes`** — use `get_hermes_home()` / `display_hermes_home()`.
+- **Patch where production reads** — facades re-import siblings inside functions; patch the
+  facade symbol the call site bound, not the defining module.
+- **No in-tree compat pointer imports** — `scripts/check_compat_pointers.py` blocks them.
+- **JS-only changes** — Python tests must not assert about `.ts`/`.tsx`/`package.json`; use
+  vitest in `tests-js/` or workspace tests.
+- **Prompt caching** — do not mutate system prompt / toolset / memory mid-conversation except
+  compression; slash commands defer with `--now` opt-in.
+
 ## What Hermes Is
 
 Hermes is a personal AI agent that runs the same agent core across a CLI, a messaging
@@ -172,15 +262,30 @@ session-scoped. Assert the GUI session gets the tool **with the env var absent**
 
 ## Development Environment
 
+Activate the project venv before any Python command:
+
 ```bash
 source .venv/bin/activate   # or: source venv/bin/activate
 ```
-`scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
-(worktrees sharing the main checkout's venv).
 
-Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --frozen`
-into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
-script; per-boot services belong in the environment `start` command or `terminals`.
+`scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
+(worktrees sharing the main checkout's venv). A candidate venv must have **pytest installed**
+— the release venv at `~/.hermes/hermes-agent/venv` often does not, and the runner skips it.
+
+**Cursor Cloud:** `scripts/cloud-agent-install.sh` is idempotent (`uv sync --frozen` into
+`.venv` with the same extras as CI, Node via nvm pinned to `.nvmrc`, `npm install --workspace
+web` + build into `hermes_cli/web_dist`). Do not put a foreground server in that script;
+per-boot services belong in the environment `start` command or terminals.
+
+**npm workspaces** (root `package.json`): `apps/*`, `ui-tui`, `ui-tui/packages/*`, `web`,
+`tests-js`. Install from repo root (`npm ci`). Individual workspaces:
+`npm install --workspace <name>`. Root scripts: `npm run check`, `npm run fix` (all workspaces).
+
+**Docs site** (`website/`): separate Docusaurus package — `npm ci && npm run build` inside
+`website/`; prebuild runs skill doc extraction (`website/scripts/extract-skills.py`).
+
+**Rust** (desktop update helper): `native/` + `.github/workflows/rust-tests.yml` — only when
+touching the Rust crate or `scripts/desktop-update/`.
 
 ## Project Structure
 
@@ -214,7 +319,7 @@ hermes-agent/
 ├── evals/                # Offline benchmarks (codebase_navigability/, compaction/, ...)
 ├── scripts/              # run_tests.sh, release.py, check_compat_pointers.py, ci/
 ├── website/              # Docusaurus docs (developer-guide/ holds the long-form area docs)
-└── tests/                # Pytest suite (~39k tests / ~3.7k files, Sep 2026)
+└── tests/                # Pytest suite (~39k tests / ~4.1k files, Sep 2026)
 ```
 
 **User state:** `~/.hermes/config.yaml` (settings), `~/.hermes/.env` (secrets only),
@@ -295,11 +400,15 @@ Table-driven beats condition ladders for ids/routes/views. `src/app` owns routes
 
 ## Dependency Pinning Policy
 
-All dependencies carry upper bounds (litellm compromise #2796/#2810; Mini Shai-Hulud worm,
-May 2026). PyPI: `>=floor,<next_major` (`"httpx>=0.28.1,<1"`); pre-1.0: `<0.(minor+2)`
-(`>=0.29,<0.32`). Git URLs: 40-char commit SHA. GitHub Actions: SHA + `# vN` comment. CI-only
-pip: `==exact`. A bare `>=X.Y.Z` is rejected by CI and reviewers. Run `uv lock` after
-changing `pyproject.toml`. Reference: #2810 (bounds), #9801 (SHA pinning + audit CI).
+Supply-chain posture (litellm compromise #2796/#2810; Mini Shai-Hulud worm, May 2026):
+
+- **Direct runtime deps** in `[project.dependencies]` are **exact-pinned** (`==X.Y.Z`) so PyPI
+  cannot slip a new version past review. Bump the pin and regenerate `uv.lock` together.
+- **Other deps** use bounded ranges: PyPI `>=floor,<next_major`; pre-1.0 `<0.(minor+2)`.
+- **Git URLs:** 40-char commit SHA. **GitHub Actions:** SHA + `# vN` comment.
+- A bare `>=X.Y.Z` with no upper bound is rejected by CI and reviewers.
+- **`uv.lock` is canonical** — CI uses `uv sync --locked`; Cloud bootstrap uses `--frozen`.
+  Run `uv lock` after any `pyproject.toml` change. Reference: #2810 (bounds), #9801 (SHA audit CI).
 
 ## Commits, Merges, PRs
 
