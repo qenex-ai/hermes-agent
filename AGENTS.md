@@ -172,15 +172,51 @@ session-scoped. Assert the GUI session gets the tool **with the env var absent**
 
 ## Development Environment
 
+Python **3.11** (see `.python-version`; `requires-python = ">=3.11,<3.14"`). Node **^22 / ^24 / ≥26**
+(see root `package.json` `engines` and `.nvmrc`).
+
 ```bash
+# First-time / refresh (local) — from repo root, with uv installed
+uv sync --frozen --python 3.11 --extra all --extra dev
 source .venv/bin/activate   # or: source venv/bin/activate
+npm ci
 ```
+
 `scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
-(worktrees sharing the main checkout's venv).
+(worktrees sharing the main checkout's venv). The venv must have **pytest** installed — a
+release venv at `~/.hermes/hermes-agent/venv` without `[dev]` extras is skipped.
 
 Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --frozen`
 into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
 script; per-boot services belong in the environment `start` command or `terminals`.
+
+## Build & lint
+
+Verified invocations — use these exact commands, not bare `pytest` / `eslint` guesses.
+
+**Python** (venv active; `ruff` + `ty` ship in the `[dev]` extra):
+
+```bash
+scripts/run_tests.sh                                    # tests — CI-parity (see Testing)
+scripts/run_tests.sh tests/gateway/                     # one directory
+scripts/run_tests.sh tests/agent/test_foo.py -k test_x    # file + -k filter
+ruff check .                                            # blocking in CI (.github/workflows/lint.yml)
+ty check                                                # advisory typecheck diff in CI
+scripts/check_compat_pointers.py                        # in-tree must not use PLUGIN-COMPAT paths
+```
+
+**JavaScript / TypeScript** (from repo root after `npm ci`):
+
+```bash
+npm run check                                           # all workspaces' `check` scripts
+node .github/scripts/run-workspace-checks.mjs           # CI-parity (parallel check:* discovery)
+npm run --workspace ui-tui check                        # TUI only (see tui_gateway/AGENTS.md)
+npm run --workspace apps/desktop check                  # desktop only (see apps/desktop/AGENTS.md)
+npm run --workspace web check                           # dashboard SPA only (see web/AGENTS.md)
+```
+
+Per-workspace dev commands (`ui-tui`: `npm run dev`, `npm test`, …) live in the area
+`AGENTS.md` files listed in the routing table below.
 
 ## Project Structure
 
@@ -295,11 +331,12 @@ Table-driven beats condition ladders for ids/routes/views. `src/app` owns routes
 
 ## Dependency Pinning Policy
 
-All dependencies carry upper bounds (litellm compromise #2796/#2810; Mini Shai-Hulud worm,
-May 2026). PyPI: `>=floor,<next_major` (`"httpx>=0.28.1,<1"`); pre-1.0: `<0.(minor+2)`
-(`>=0.29,<0.32`). Git URLs: 40-char commit SHA. GitHub Actions: SHA + `# vN` comment. CI-only
-pip: `==exact`. A bare `>=X.Y.Z` is rejected by CI and reviewers. Run `uv lock` after
-changing `pyproject.toml`. Reference: #2810 (bounds), #9801 (SHA pinning + audit CI).
+Supply-chain hardening after litellm (#2796/#2810) and Mini Shai-Hulud (May 2026). **Core
+`[project].dependencies` are exact-pinned** (`openai==2.24.0`, …) — the only way a new PyPI
+version reaches users is an intentional pin bump + lock regen. Optional extras may still use
+bounded ranges (`>=floor,<next_major`; pre-1.0: `<0.(minor+2)`). Git URLs: 40-char commit SHA.
+GitHub Actions: SHA + `# vN` comment. Never add a bare `>=X.Y.Z` without a ceiling to core deps.
+After any `pyproject.toml` change: **`uv lock`**. Reference: #2810, #9801 (SHA pinning + audit CI).
 
 ## Commits, Merges, PRs
 
