@@ -146,14 +146,18 @@ def _hosted_ocr_config() -> tuple:
     """(enabled, api_key, api_url); never raises, no network. Maintainer decision: the ONLY route
     is a direct ``FIRECRAWL_API_KEY`` (anydoc defaults api_url); the Nous gateway's Parse proxy
     live-probed broken, so it is NOT used. ``file_tools.hosted_ocr: false`` disables even with a
-    key."""
-    api_key = os.environ.get("FIRECRAWL_API_KEY") or None
-    api_url = (os.environ.get("FIRECRAWL_API_URL") or "").strip() or None
-    if api_key:
-        from hermes_cli.billing_wallet import bound_vendor_secret
+    key. The key is a profile credential: read through the secret scope so a multiplexed
+    secondary never spends (or reveals its documents to) the default profile's Firecrawl key."""
+    from agent.secret_scope import get_secret
+    from hermes_cli.billing_wallet import bound_vendor_secret
 
+    api_key = get_secret("FIRECRAWL_API_KEY") or None
+    # Wallet host-check only; hosted OCR always returns api_url=None (anydoc defaults
+    # to api.firecrawl.dev). A redirected FIRECRAWL_API_URL must not inherit the company key.
+    wallet_url = (get_secret("FIRECRAWL_API_URL") or "").strip()
+    if api_key:
         api_key = bound_vendor_secret(
-            vendor="firecrawl", company_secret=api_key, target_url=api_url or "",
+            vendor="firecrawl", company_secret=api_key, target_url=wallet_url,
         ) or None
     enabled = api_key is not None
     with contextlib.suppress(Exception):
@@ -161,7 +165,7 @@ def _hosted_ocr_config() -> tuple:
         section = load_config_readonly().get("file_tools")
         if isinstance(section, dict) and section.get("hosted_ocr") is False:
             enabled = False
-    return enabled, api_key, api_url
+    return enabled, api_key, None
 
 
 def hosted_ocr_available() -> bool:

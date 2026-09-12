@@ -509,7 +509,9 @@ class TestOSSBackend:
         state, _, factory = _install_fake_mem0(monkeypatch)
         monkeypatch.setenv("OPENROUTER_API_KEY", "router-sentinel")
         monkeypatch.setenv("OPENAI_API_KEY", "env-openai-sentinel")
-        monkeypatch.setenv("OPENAI_BASE_URL", "https://env-openai.example/v1")
+        # Official host (path is a sentinel): a redirected/unofficial OPENAI_BASE_URL
+        # withholds the company env key (billing_wallet).
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1/from-environ")
 
         module = importlib.import_module("plugins.memory.mem0._openai_llm")
         config = factory.provider_to_class["openai"][1](model="gpt-5-mini")
@@ -517,7 +519,7 @@ class TestOSSBackend:
 
         assert len(state.clients) == 1
         assert state.clients[0].api_key == "env-openai-sentinel"
-        assert state.clients[0].base_url == "https://env-openai.example/v1"
+        assert state.clients[0].base_url == "https://api.openai.com/v1/from-environ"
 
     def test_missing_openai_key_fails_before_client_and_hides_router_secret(self, monkeypatch):
         state, _, factory = _install_fake_mem0(monkeypatch)

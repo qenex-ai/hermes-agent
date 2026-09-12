@@ -43,7 +43,8 @@ class BrowserbaseBrowserProvider(CloudBrowserProvider):
     def _get_config_or_none(self) -> Optional[Dict[str, Any]]:
         from hermes_cli.billing_wallet import bound_vendor_secret
 
-        base_url = os.environ.get("BROWSERBASE_BASE_URL", "https://api.browserbase.com").rstrip("/")
+        # Per-profile like the key: the scoped key must not be sent to the default profile's endpoint.
+        base_url = (get_secret("BROWSERBASE_BASE_URL", "") or "https://api.browserbase.com").rstrip("/")
         api_key = bound_vendor_secret(
             vendor="browserbase", company_secret=get_secret("BROWSERBASE_API_KEY") or "",
             target_url=base_url,

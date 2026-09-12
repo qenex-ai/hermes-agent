@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Dict, List, Optional, Union
 
 from mem0.configs.llms.base import BaseLlmConfig
@@ -37,12 +36,15 @@ class DirectOpenAILLM(OpenAILLM):
         # Bypass OpenAILLM.__init__ (it picks OpenRouter when OPENROUTER_API_KEY is
         # set); LLMBase still owns validation and supported-parameter filtering.
         LLMBase.__init__(self, config)
-        api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
-        base_url = self.config.openai_base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        # OPENAI_API_KEY / OPENAI_BASE_URL are profile credentials: read them through the secret
+        # scope, never raw os.environ, or a multiplexed secondary's memory extraction runs on the
+        # default profile's OpenAI account (and its proxy).
+        from agent.secret_scope import get_secret
         from hermes_cli.billing_wallet import bound_vendor_secret
 
+        base_url = self.config.openai_base_url or get_secret("OPENAI_BASE_URL", "") or "https://api.openai.com/v1"
         explicit = (self.config.api_key or "").strip()
-        company = "" if explicit else (os.getenv("OPENAI_API_KEY") or "")
+        company = "" if explicit else (get_secret("OPENAI_API_KEY", "") or "")
         api_key = bound_vendor_secret(
             vendor="openai", company_secret=company, explicit_secret=explicit, target_url=base_url,
         )
