@@ -182,6 +182,98 @@ Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync 
 into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
 script; per-boot services belong in the environment `start` command or `terminals`.
 
+## Quick Reference — Setup, Build, Lint
+
+Canonical commands from `pyproject.toml`, `package.json`, CI workflows, and `scripts/`.
+Human-oriented setup narrative: `CONTRIBUTING.md`.
+
+### Prerequisites
+
+| Tool | Version | Where pinned |
+|------|---------|--------------|
+| Python | **3.11** preferred (3.12–3.13 OK; **not 3.14**) | `.python-version`, `requires-python = ">=3.11,<3.14"` |
+| uv | **0.9.28** in CI | `.github/workflows/tests.yml`, `.buildkite/pipeline.yml` |
+| Node.js | **26** (also ^22.22, ^24.11 per engines) | `.nvmrc`, root `package.json` `engines.node` |
+| npm | **12.x** in CI | `.github/workflows/js-tests.yml` |
+| git-lfs | required for assets | `CONTRIBUTING.md` |
+
+### Bootstrap
+
+```bash
+scripts/cloud-agent-install.sh          # idempotent cloud-agent path
+source .venv/bin/activate               # or: source venv/bin/activate
+```
+
+Manual install matching the CI tests job (`tests.yml`):
+
+```bash
+uv sync --locked --python 3.11 \
+  --extra all --extra dev \
+  --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
+source .venv/bin/activate
+npm ci                                  # full workspace; cloud install builds web only
+```
+
+After editing `pyproject.toml`: run `uv lock` and commit `uv.lock`.
+
+### Python — test, lint, typecheck
+
+```bash
+scripts/run_tests.sh                                    # full suite — ALWAYS prefer this
+scripts/run_tests.sh tests/gateway/                     # one directory
+scripts/run_tests.sh tests/agent/test_foo.py -k test_x  # file + pattern
+
+ruff check .                                            # blocking in CI (see [tool.ruff.lint.select])
+ty check                                                # advisory PR diff; run before large refactors
+
+python scripts/check-windows-footguns.py --all          # blocking in CI
+python scripts/check_compat_pointers.py                 # blocking — no in-tree compat imports
+python scripts/ci/classify_changes.py                   # which CI lanes your diff triggers
+```
+
+### JavaScript / TypeScript
+
+npm workspaces (root `package.json`): `apps/*`, `ui-tui`, `web`, `tests-js`.
+
+```bash
+npm ci
+npm run check                              # all workspaces (serial)
+npm run --workspace web check              # dashboard: tsc + vitest + eslint
+npm run --workspace ui-tui check           # TUI: build:ink + tsc + vitest + eslint
+npm run --workspace apps/desktop check     # desktop lint + UI + platform tests
+npm run --workspace web build              # → hermes_cli/web_dist
+npm run fix                                # eslint --fix across workspaces
+```
+
+CI runs each workspace's `check:*` sub-scripts in parallel (`js-tests.yml`), not
+`npm run --ws check`. Python pytest must not assert about JS sources — use vitest
+(`tests-js/`).
+
+### Run locally
+
+```bash
+hermes doctor
+hermes chat -q "Hello"
+hermes --tui
+hermes dashboard                           # needs web_dist from web build
+```
+
+### CI map (merge blockers)
+
+Jobs are change-scoped via `scripts/ci/classify_changes.py`. Orchestrators:
+GitHub Actions `workflow_call` lanes + Buildkite (`.buildkite/pipeline.yml`).
+
+| Lane | What runs |
+|------|-----------|
+| Python tests | `scripts/run_tests.sh` |
+| Python lint (blocking) | `ruff check .` |
+| Windows footguns | `scripts/check-windows-footguns.py --all` |
+| Compat pointers | `scripts/check_compat_pointers.py` |
+| Lockfile | `uv sync --locked` / `uv-lockfile-check.yml` |
+| JS/TS | per-workspace `check:*` (`js-tests.yml`) |
+| OS-specific pytest | files marked `linux_only` / `macos_only` / `windows_only` |
+
 ## Project Structure
 
 Counts shift constantly; the filesystem is canonical. Load-bearing entry points:
@@ -295,11 +387,14 @@ Table-driven beats condition ladders for ids/routes/views. `src/app` owns routes
 
 ## Dependency Pinning Policy
 
-All dependencies carry upper bounds (litellm compromise #2796/#2810; Mini Shai-Hulud worm,
-May 2026). PyPI: `>=floor,<next_major` (`"httpx>=0.28.1,<1"`); pre-1.0: `<0.(minor+2)`
-(`>=0.29,<0.32`). Git URLs: 40-char commit SHA. GitHub Actions: SHA + `# vN` comment. CI-only
-pip: `==exact`. A bare `>=X.Y.Z` is rejected by CI and reviewers. Run `uv lock` after
-changing `pyproject.toml`. Reference: #2810 (bounds), #9801 (SHA pinning + audit CI).
+Direct dependencies in `pyproject.toml` are **exact-pinned** (`package==X.Y.Z`). The pin
+bump is the review gate (Mini Shai-Hulud worm, May 2026) — bare `>=X.Y.Z` ranges on direct
+deps are rejected. After any pin change: `uv lock` and commit `uv.lock`. CI runs
+`uv sync --locked` (`tests.yml`, `uv-lockfile-check.yml`).
+
+A few transitive floors still use bounded ranges where noted in-file (e.g.
+`urllib3>=2.7.0,<3`). Git URLs: 40-char commit SHA. GitHub Actions: SHA + `# vN` comment.
+CI-only pip: `==exact`. Reference: #2810, #9801 (supply-chain audit CI).
 
 ## Commits, Merges, PRs
 
