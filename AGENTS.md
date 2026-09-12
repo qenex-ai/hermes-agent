@@ -172,15 +172,42 @@ session-scoped. Assert the GUI session gets the tool **with the env var absent**
 
 ## Development Environment
 
+**Toolchain:** Python 3.11 (`.python-version`; `requires-python >=3.11,<3.14` in
+`pyproject.toml`), **uv** for deps, Node **26** (`.nvmrc`; root `package.json` engines:
+`^22.22.0 || ^24.11.0 || >=26.0.0`).
+
 ```bash
+# Fresh clone — same extras as .github/workflows/tests.yml / cloud-agent-install.sh
+uv sync --frozen --python 3.11 --extra all --extra dev \
+  --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
 source .venv/bin/activate   # or: source venv/bin/activate
+
+npm ci                      # JS workspaces (web, ui-tui, apps/desktop, tests-js, …)
+npm run --workspace web build   # dashboard → hermes_cli/web_dist
 ```
+
 `scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
-(worktrees sharing the main checkout's venv).
+(worktrees sharing the main checkout's venv). After changing `pyproject.toml` deps, run
+`uv lock` and commit `uv.lock`.
 
 Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --frozen`
 into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
 script; per-boot services belong in the environment `start` command or `terminals`.
+
+### Lint & static checks
+
+```bash
+ruff check .                              # blocking in CI ([tool.ruff.lint.select] in pyproject.toml)
+ty check                                  # typecheck; advisory diff in CI
+python scripts/check-windows-footguns.py --all
+python scripts/check_compat_pointers.py   # blocking; in-tree must not use PLUGIN-COMPAT imports
+npm run check                             # all workspaces (serial over --ws)
+node .github/scripts/run-workspace-checks.mjs   # what CI runs (parallel per check:* script)
+```
+
+Per-workspace when iterating: `npm run check --workspace web`, `--workspace ui-tui`,
+`--workspace apps/desktop`, `--workspace tests-js`.
 
 ## Project Structure
 
