@@ -1,0 +1,77 @@
+# QENEX LTD London — Hermes runtime contract
+# Verified 2026-09-13 from Cursor Ultra + live MCP (mcp.qenex.ai v45).
+#
+# Self-hosted hostnames hermes.qenex.ai and llm.qenex.ai resolve via
+# wildcard *.qenex.ai A 198.244.164.221 but have no Caddy TLS vhost
+# (OpenSSL alert 80). systemd units hermes-agent and qenex-hermes are
+# inactive. Do not send OpenAI-compatible traffic there until ops applies
+# ops/london/missing-sni.caddy from qenex-ai/cursor and starts the unit.
+#
+# Until then: run this checkout locally (or on a loopback bind) and talk
+# to the London stack through MCP origin POST https://mcp.qenex.ai/
+# (POST /mcp is 404). Cursor Ultra (qenex-ai/cursor) is the operator console.
+
+operator: QENEX LTD London
+company_number: "16523814"
+
+mcp:
+  origin: https://mcp.qenex.ai
+  jsonrpc: POST /
+  sse: GET /sse
+  oauth_resource: https://mcp.qenex.ai
+  do_not_use: POST /mcp
+
+grok:
+  # Preferred reasoning plane for Cursor Ultra. London MCP active_provider
+  # is currently ollama; openai_compat can target xAI without switching the fleet.
+  base_url: https://api.x.ai/v1
+  model: grok-4
+  env: XAI_API_KEY
+
+lab:
+  base: https://lab.qenex.ai
+  health: /api/v1/lab/health
+  molecules: /api/v1/lab/molecules  # Bearer required
+
+git:
+  forgejo: https://git.qenex.ai
+  github_org: https://github.com/qenex-ai
+  this_repo: qenex-ai/hermes-agent
+
+ipfs:
+  pinata_api: https://api.pinata.cloud
+  london_kubo_peer: 12D3KooWRfLHg4wGktiyb2M4hQ8dMJMft6Jg1Qo8djb1kuZGDS7n
+  evidence: https://ipfs.qenex.ai
+  dead_vhost: https://pinata.qenex.ai
+
+mail:
+  canonical: mail.qenex.ai
+  imap: { host: mail.qenex.ai, port: 993, tls: true }
+  smtp: { host: mail.qenex.ai, port: 587, starttls: true }
+  not: [email.qenex.ai, webmail.qenex.ai]
+
+registrar:
+  public_rdap: https://rdap.qenex.ai
+  operator_vhost_missing_sni: https://registrar.qenex.ai
+
+brain:
+  base: https://brain.qenex.ai
+  agent_bus:
+    message: /v1/message
+    inbox: /v1/inbox/{agent}
+    healthz: /healthz
+  hermes_seat: hermes
+  grok_seat: grok
+
+missing_sni:
+  - hermes.qenex.ai
+  - llm.qenex.ai
+  - registrar.qenex.ai
+  - agents.qenex.ai
+  - pinata.qenex.ai
+  - email.qenex.ai
+  - webmail.qenex.ai
+  - domains.qenex.ai
+  - rekor.qenex.ai
+  caddy_snippet_in_cursor_ultra: ops/london/missing-sni.caddy
+  rekor_loopback: 127.0.0.1:8294
