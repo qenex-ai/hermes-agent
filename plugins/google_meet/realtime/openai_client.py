@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import os
 import threading
 import time
 import uuid
@@ -52,7 +53,8 @@ class RealtimeSession:
         except ImportError as exc:  # pragma: no cover - exercised via test
             raise RuntimeError("websockets package is required for OpenAI Realtime; "
                                "install with: pip install websockets") from exc
-        url = f"{REALTIME_URL}?model={self.model}"
+        base = (os.environ.get("OPENAI_REALTIME_URL") or REALTIME_URL).rstrip("/")
+        url = f"{base}?model={self.model}"
         headers = [("Authorization", f"Bearer {self.api_key}"), ("OpenAI-Beta", "realtime=v1")]
         # Newer websockets takes additional_headers=, older extra_headers=.
         try:

@@ -1,12 +1,14 @@
 """Cookie helpers for dashboard auth.
 
-All HttpOnly, ``SameSite=Lax`` unless noted, Path = proxy prefix or /: ``hermes_session_at``
-(access token; Max-Age = token TTL), ``hermes_session_rt`` (rotating refresh token; written only
-when the provider returned one, always cleared on logout/expiry), ``hermes_session_provider``
-(non-secret routing hint so an RT is not handed to the wrong provider), ``hermes_session_pkce``
-(PKCE state + CSRF nonce + provider hint, 10 min; ``SameSite=None; Secure`` over HTTPS because it
-is set on the /auth/login 302 and must survive the cross-site redirect chain — Chromium drops Lax
-cookies set on such a 302, crbug 40508226), ``hermes_sso_attempt`` (auto-SSO loop guard, 60 s).
+All HttpOnly, Path = proxy prefix or /: ``hermes_session_at`` (access token; Max-Age = token
+TTL), ``hermes_session_rt`` (rotating refresh token; written only when the provider returned
+one, always cleared on logout/expiry), ``hermes_session_provider`` (non-secret routing hint so
+an RT is not handed to the wrong provider) — these three are ``SameSite=Strict`` because they
+are same-site credentials and must not ride a cross-site request. ``hermes_session_pkce``
+(PKCE state + CSRF nonce + provider hint, 10 min; ``SameSite=None; Secure`` over HTTPS because
+it is set on the /auth/login 302 and must survive the cross-site redirect chain — Chromium
+drops Lax cookies set on such a 302, crbug 40508226), ``hermes_sso_attempt`` (auto-SSO loop
+guard, 60 s, ``SameSite=Lax`` so the top-level IDP return still carries it).
 ``Secure`` only when ``request.url.scheme`` is https. Cookie-prefix hardening per
 draft-west-cookie-prefixes: bare name over HTTP; ``__Host-`` on gated HTTPS with Path=/;
 ``__Secure-`` behind a proxy prefix (``__Host-`` forbids Path != /). Setters and readers BOTH
@@ -63,6 +65,19 @@ def _common_attrs(*, use_https: bool, prefix: str) -> dict:
     return attrs
 
 
+def _session_attrs(*, use_https: bool, prefix: str) -> dict:
+    """Attrs for authenticated session cookies (AT / RT / provider).
+
+    ``SameSite=Strict`` — these are set after the IDP round-trip and must
+    never be sent on a cross-site request. PKCE stays ``None`` (HTTPS) /
+    ``Lax`` (HTTP) via :func:`_pkce_attrs`; SSO attempt stays ``Lax`` via
+    :func:`_common_attrs`.
+    """
+    attrs = _common_attrs(use_https=use_https, prefix=prefix)
+    attrs["samesite"] = "strict"
+    return attrs
+
+
 def _pkce_attrs(*, use_https: bool, prefix: str) -> dict:
     """Attributes shared by the PKCE set AND clear paths (a shape mismatch
     means the browser silently keeps the stale cookie)."""
@@ -84,7 +99,8 @@ def set_session_provider_cookie(
     """Persist the non-secret provider routing hint for token refresh."""
     if provider:
         _set(response, SESSION_PROVIDER_COOKIE, provider, max_age=_RT_MAX_AGE,
-             use_https=use_https, prefix=prefix)
+             use_https=use_https, prefix=prefix,
+             attrs=_session_attrs(use_https=use_https, prefix=prefix))
 
 
 def set_session_cookies(
@@ -98,11 +114,12 @@ def set_session_cookies(
     ``Session.refresh_token == ""`` and we simply don't persist the RT cookie — the session then behaves as
     access-token-only until the AT expires. No other branch changes between the two cases.
     """
+    session_attrs = _session_attrs(use_https=use_https, prefix=prefix)
     _set(response, SESSION_AT_COOKIE, access_token, max_age=access_token_expires_in,
-         use_https=use_https, prefix=prefix)
+         use_https=use_https, prefix=prefix, attrs=session_attrs)
     if refresh_token:
         _set(response, SESSION_RT_COOKIE, refresh_token, max_age=_RT_MAX_AGE,
-             use_https=use_https, prefix=prefix)
+             use_https=use_https, prefix=prefix, attrs=session_attrs)
     set_session_provider_cookie(response, provider=provider, use_https=use_https, prefix=prefix)
 
 
@@ -122,10 +139,10 @@ def _clear_cookie_variants(
 
 def clear_session_cookies(response: Response, *, prefix: str = "") -> None:
     """Delete the AT, RT and provider cookies (every name variant, active path)."""
-    bare_attrs = _common_attrs(use_https=False, prefix=prefix)
+    bare_attrs = _session_attrs(use_https=False, prefix=prefix)
     for name in (SESSION_AT_COOKIE, SESSION_RT_COOKIE, SESSION_PROVIDER_COOKIE):
         _clear_cookie_variants(
-            response, name, prefix=prefix, https_samesite="lax", bare_attrs=bare_attrs)
+            response, name, prefix=prefix, https_samesite="strict", bare_attrs=bare_attrs)
 
 
 def encode_pkce_payload(parts: dict[str, str]) -> str:

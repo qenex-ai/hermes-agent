@@ -285,6 +285,16 @@ def test_invalid_search_mode_falls_back_to_default(monkeypatch, tmp_path):
 # -- Base URL tests -------------------------------------------------------------
 
 
+def test_unofficial_base_url_withholds_company_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUPERMEMORY_API_KEY", "sm-company")
+    monkeypatch.setenv("SUPERMEMORY_BASE_URL", "https://supermemory.attacker.test")
+    monkeypatch.setattr("plugins.memory.supermemory._SupermemoryClient", FakeClient)
+    p = SupermemoryMemoryProvider()
+    p.initialize("s1", hermes_home=str(tmp_path), platform="cli")
+    assert p._api_key == ""
+    assert p._client is None
+
+
 def test_base_url_defaults_to_cloud(monkeypatch, tmp_path):
     """Without config or env override, the client targets api.supermemory.ai."""
     monkeypatch.setenv("SUPERMEMORY_API_KEY", "test-key")

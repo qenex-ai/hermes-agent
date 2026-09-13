@@ -140,8 +140,8 @@ class TestGetBackendSearXNG:
         assert web_tools._get_backend() == "searxng"
 
 
-    def test_searxng_does_not_override_higher_priority_provider(self, monkeypatch):
-        """Exa (higher priority than searxng) should win in auto-detect."""
+    def test_searxng_wins_over_metered_keys_when_bind_enabled(self, monkeypatch):
+        """Self-hosted SearXNG autodetects; an unused EXA_API_KEY does not spend Exa."""
         from tools import web_tools
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
         monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
@@ -150,7 +150,7 @@ class TestGetBackendSearXNG:
         monkeypatch.setenv("EXA_API_KEY", "exa_test_key")
         monkeypatch.setenv("SEARXNG_URL", "http://localhost:8080")
         monkeypatch.setattr(web_tools, "_is_tool_gateway_ready", lambda: False)
-        assert web_tools._get_backend() == "exa"
+        assert web_tools._get_backend() == "searxng"
 
     def test_auto_detect_picks_searxng_when_url_only_in_hermes_config(self, monkeypatch):
         """#34290 follow-up: a config-only SEARXNG_URL (absent from process env)

@@ -100,6 +100,10 @@ class _StubHTTPClient:
     def __exit__(self, *args):
         return False
 
+    def get(self, *args, **kwargs):
+        self.last_call = ("get", args, kwargs)
+        return self._response
+
     def post(self, *args, **kwargs):
         self.last_call = ("post", args, kwargs)
         return self._response
@@ -438,10 +442,7 @@ def test_xai_oauth_discovery_raises_typed_error_on_malformed_json(monkeypatch):
         def json(self):
             raise ValueError("Expecting value: line 1 column 1 (char 0)")
 
-    monkeypatch.setattr(
-        "hermes_cli.auth.httpx.get",
-        lambda *a, **kw: _BadJSON(),
-    )
+    _patch_httpx_client(monkeypatch, _BadJSON())
     with pytest.raises(AuthError) as exc:
         _xai_oauth_discovery()
     assert exc.value.code == "xai_discovery_invalid_json"
@@ -508,13 +509,13 @@ def test_xai_oauth_discovery_validates_endpoints(monkeypatch):
         def json(self):
             return self._payload
 
-    def _fake_get(url, headers=None, timeout=None):
-        return _StubGetResponse({
+    _patch_httpx_client(
+        monkeypatch,
+        _StubGetResponse({
             "authorization_endpoint": "https://auth.x.ai/oauth2/authorize",
             "token_endpoint": "https://evil.example.com/token",  # poisoned
-        })
-
-    monkeypatch.setattr("hermes_cli.auth.httpx.get", _fake_get)
+        }),
+    )
     with pytest.raises(AuthError) as exc:
         _xai_oauth_discovery()
     assert exc.value.code == "xai_discovery_invalid"
@@ -990,3 +991,31 @@ def test_pool_sync_back_preserves_active_provider(tmp_path, monkeypatch):
     state = raw_after["providers"]["xai-oauth"]["tokens"]
     assert state["access_token"] == new_access
     assert state["refresh_token"] == "rt-rotated"
+
+
+def test_xai_http_client_uses_happy_eyeballs_backend(monkeypatch):
+    """xAI OAuth must race IPv4 against blackholed AAAA, not serial-fail errno 97."""
+    for name in (
+        "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
+        "https_proxy", "http_proxy", "all_proxy",
+        "NO_PROXY", "no_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    from agent import process_bootstrap
+    from hermes_cli.auth_xai import _xai_http_client
+
+    client = _xai_http_client(timeout=5.0)
+    try:
+        transports = [client._transport, *client._mounts.values()]
+        backends = [
+            transport._pool._network_backend
+            for transport in transports
+            if transport is not None and hasattr(transport, "_pool")
+        ]
+        assert any(
+            isinstance(backend, process_bootstrap._HappyEyeballsSyncBackend)
+            for backend in backends
+        )
+    finally:
+        client.close()

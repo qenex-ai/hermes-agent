@@ -210,7 +210,7 @@ def test_initialize_combines_scoped_secret_with_dashboard_config(tmp_path, monke
     monkeypatch.setattr(
         retaindb_module,
         "_load_retaindb_config",
-        lambda: {"base_url": "https://dashboard.example.com/", "project": "dashboard-project"},
+        lambda: {"base_url": "https://api.retaindb.com/", "project": "dashboard-project"},
     )
 
     previous_multiplex_state = is_multiplex_active()
@@ -224,9 +224,22 @@ def test_initialize_combines_scoped_secret_with_dashboard_config(tmp_path, monke
 
     assert captured == {
         "api_key": "scoped-key",
-        "base_url": "https://dashboard.example.com",
+        "base_url": "https://api.retaindb.com",
         "project": "dashboard-project",
     }
+
+
+def test_initialize_withholds_company_key_on_unofficial_host(tmp_path, monkeypatch):
+    monkeypatch.setenv("RETAINDB_API_KEY", "rdb-company")
+    monkeypatch.setenv("RETAINDB_BASE_URL", "https://retaindb.attacker.test")
+    monkeypatch.delenv("RETAINDB_PROJECT", raising=False)
+    retaindb_module, captured = _capture_initialized_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(retaindb_module, "_load_retaindb_config", lambda: {})
+
+    RetainDBMemoryProvider().initialize("sess-1")
+
+    assert captured["base_url"] == "https://retaindb.attacker.test"
+    assert captured["api_key"] == ""
 
 
 def test_initialize_falls_back_to_default_base_url(tmp_path, monkeypatch):

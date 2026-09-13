@@ -1,0 +1,160 @@
+name: Deploy Vercel
+
+# Prebuilt Vercel deploys for the Docusaurus site in website/.
+# Preview: pull_request. Production: push to main, published release, or
+# workflow_dispatch (defaults to production).
+#
+# Required repository secrets (from `.vercel/project.json` after `vercel link`
+# in website/, plus a Vercel token with deploy scope):
+#   VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+#
+# The Vercel project Root Directory must be `website` (vercel.json lives
+# there). Disable Vercel git auto-deploy for this project so CI is the only
+# builder — otherwise a hook rebuild races this prebuilt artifact and skips
+# the Python skill-doc generators.
+#
+# Fork PRs and repos without the secrets skip cleanly (can_deploy=false).
+# This workflow does not use `secrets: inherit` from the untrusted CI
+# orchestrator; it is triggered on its own.
+
+on:
+  pull_request:
+    paths:
+      - "website/**"
+      - "skills/**"
+      - "optional-skills/**"
+      - ".github/workflows/deploy-vercel.yml"
+      - ".github/actions/vercel-prebuilt-deploy/**"
+      - "scripts/ci/vercel_deploy.py"
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "skills/**"
+      - "optional-skills/**"
+      - ".github/workflows/deploy-vercel.yml"
+      - ".github/actions/vercel-prebuilt-deploy/**"
+      - "scripts/ci/vercel_deploy.py"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Vercel environment to deploy
+        type: choice
+        options: [production, preview]
+        default: production
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: vercel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  configure:
+    name: Resolve Vercel target
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      can_deploy: ${{ steps.gate.outputs.can_deploy }}
+      environment: ${{ steps.gate.outputs.environment }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/vercel_deploy.py
+          sparse-checkout-cone-mode: false
+
+      - name: Gate on secrets and pick environment
+        id: gate
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment || '' }}
+        run: python3 scripts/ci/vercel_deploy.py gate
+
+  deploy:
+    name: Prebuilt Vercel deploy
+    needs: configure
+    if: needs.configure.outputs.can_deploy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_DEPLOY_ENVIRONMENT: ${{ needs.configure.outputs.environment }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: grab npm 12
+        run: npm i -g npm@12
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Install PyYAML for skill extraction
+        uses: ./.github/actions/retry
+        with:
+          command: pip install pyyaml==6.0.2 httpx==0.28.1
+
+      - name: Extract skill metadata for dashboard
+        run: python3 website/scripts/extract-skills.py
+
+      - name: Regenerate per-skill docs pages + catalogs
+        run: python3 website/scripts/generate-skill-docs.py
+
+      - name: Deploy to Vercel
+        id: vercel
+        uses: ./.github/actions/vercel-prebuilt-deploy
+        with:
+          environment: ${{ needs.configure.outputs.environment }}
+
+      - name: Summary
+        env:
+          DEPLOY_URL: ${{ steps.vercel.outputs.url }}
+          DEPLOY_ENV: ${{ needs.configure.outputs.environment }}
+        run: |
+          {
+            echo "## Deploy Result"
+            echo "- **URL**: ${DEPLOY_URL}"
+            echo "- **Target**: ${DEPLOY_ENV}"
+            echo "- **Status**: READY"
+            echo "- **Commit**: \`${GITHUB_SHA:0:7}\`"
+            echo "- **Framework**: Docusaurus"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment preview URL on the PR
+        if: github.event_name == 'pull_request' && steps.vercel.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_URL: ${{ steps.vercel.outputs.url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          BODY="$(python3 scripts/ci/vercel_deploy.py comment --url "$DEPLOY_URL" --sha "$GITHUB_SHA")"
+          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | contains("<!-- hermes-vercel-preview -->")) | .id' \
+            | head -n1 || true)"
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" -f body="$BODY"
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$BODY"
+          fi

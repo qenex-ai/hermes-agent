@@ -1,5 +1,6 @@
 """Tests for network.force_ipv4 — the socket.getaddrinfo monkey-patch."""
 
+import errno
 import importlib
 import socket
 
@@ -17,11 +18,18 @@ class TestApplyIPv4Preference:
 
     def setup_method(self):
         """Save the original getaddrinfo before each test."""
+        import hermes_constants as hc
+
         self._original = socket.getaddrinfo
+        self._saved_ipv6_cache = hc._IPV6_SOCKETS_SUPPORTED
+        hc._IPV6_SOCKETS_SUPPORTED = None
 
     def teardown_method(self):
         """Restore the original getaddrinfo after each test."""
+        import hermes_constants as hc
+
         socket.getaddrinfo = self._original
+        hc._IPV6_SOCKETS_SUPPORTED = self._saved_ipv6_cache
 
 
     def test_patches_getaddrinfo_when_forced(self):
@@ -75,5 +83,45 @@ class TestApplyIPv4Preference:
         socket.getaddrinfo("example.com", 80, family=socket.AF_INET6)
         assert calls[-1] == socket.AF_INET6, "Explicit AF_INET6 should pass through"
 
+    def test_probe_false_on_eafnosupport(self, monkeypatch):
+        """Kernel EAFNOSUPPORT is a hard no — not socket.has_ipv6."""
+        import hermes_constants as hc
 
+        real_socket = socket.socket
 
+        def _socket(family=-1, *args, **kwargs):
+            if family == socket.AF_INET6:
+                raise OSError(errno.EAFNOSUPPORT, "Address family not supported by protocol")
+            return real_socket(family, *args, **kwargs)
+
+        monkeypatch.setattr(socket, "socket", _socket)
+        assert hc.ipv6_sockets_supported() is False
+
+    def test_apply_without_force_patches_when_ipv6_unavailable(self):
+        """Dashboard OAuth on IPv6-disabled hosts must patch without config."""
+        import hermes_constants as hc
+
+        hc._IPV6_SOCKETS_SUPPORTED = False
+        original = socket.getaddrinfo
+        hc.apply_ipv4_preference(force=False)
+        assert socket.getaddrinfo is not original
+        assert getattr(socket.getaddrinfo, "_hermes_ipv4_patched", False) is True
+
+    def test_apply_without_force_skips_when_ipv6_available(self):
+        """Dual-stack hosts keep AAAA unless network.force_ipv4 is set."""
+        import hermes_constants as hc
+
+        hc._IPV6_SOCKETS_SUPPORTED = True
+        original = socket.getaddrinfo
+        hc.apply_ipv4_preference(force=False)
+        assert socket.getaddrinfo is original
+
+    def test_is_address_family_unsupported_unwraps_cause(self):
+        """httpx wraps errno 97; the detector must see the OSError cause."""
+        from hermes_constants import is_address_family_unsupported
+
+        inner = OSError(errno.EAFNOSUPPORT, "Address family not supported by protocol")
+        outer = ConnectionError("All connection attempts failed")
+        outer.__cause__ = inner
+        assert is_address_family_unsupported(outer) is True
+        assert is_address_family_unsupported(RuntimeError("timeout")) is False

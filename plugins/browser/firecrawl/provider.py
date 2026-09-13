@@ -43,7 +43,12 @@ class FirecrawlBrowserProvider(CloudBrowserProvider):
         return {"base_url": self._api_url()}
 
     def _headers(self, config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-        api_key = get_secret("FIRECRAWL_API_KEY")
+        from hermes_cli.billing_wallet import bound_vendor_secret
+
+        api_key = bound_vendor_secret(
+            vendor="firecrawl", company_secret=get_secret("FIRECRAWL_API_KEY") or "",
+            target_url=self._api_url(),
+        )
         if not api_key:
             raise ValueError(
                 "FIRECRAWL_API_KEY environment variable is required. "

@@ -1,0 +1,27 @@
+{
+  "name": "@hermes/cursor-sdk",
+  "version": "1.0.0",
+  "description": "Hermes wrapper around @cursor/sdk (prompt, create/send, resume)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "bin": {
+    "hermes-cursor-sdk": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@cursor/sdk": ">=1.0.30 <2",
+    "tsx": ">=4.19.0 <5"
+  },
+  "devDependencies": {
+    "@types/node": ">=22.10.0 <25",
+    "typescript": ">=5.8.0 <7",
+    "vitest": ">=4.0.0 <5"
+  }
+}

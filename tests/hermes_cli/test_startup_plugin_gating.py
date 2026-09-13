@@ -99,6 +99,25 @@ def test_reasoning_value_is_not_misclassified_as_subcommand(monkeypatch):
 # ── _BUILTIN_SUBCOMMANDS ↔ argparse registration parity ────────────────────
 
 
+def test_qenex_and_cursor_sdk_are_builtin_and_registered():
+    """Fork commands must stay on the argparse table AND the plugin-discovery
+    skip set; dropping either side after an upstream merge either slows every
+    ``hermes qenex`` / ``hermes cursor-sdk`` invocation or lets a plugin
+    shadow the name."""
+    from hermes_cli.config_defaults import DEFAULT_CONFIG, OPTIONAL_ENV_VARS
+    from hermes_cli.main import _build_cli_parser
+
+    sdk = DEFAULT_CONFIG.get("cursor_sdk")
+    assert isinstance(sdk, dict) and sdk.get("model")
+    assert "runtime" not in sdk
+    assert "CURSOR_API_KEY" in OPTIONAL_ENV_VARS
+
+    fork_cmds = ("qenex", "cursor-sdk")
+    for name in fork_cmds:
+        assert name in _BUILTIN_SUBCOMMANDS
+    _parser, subparsers = _build_cli_parser()
+    for name in fork_cmds:
+        assert name in subparsers.choices
 
 
 # ── _resolve_deferred_platform_cli_command (issue #54678) ──────────────────

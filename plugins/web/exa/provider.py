@@ -22,11 +22,22 @@ _MISSING_KEY = "EXA_API_KEY environment variable not set. Get your API key at ht
 def _get_exa_client() -> Any:
     def _factory(api_key: str) -> Any:
         from exa_py import Exa  # deliberately lazy
-        client = Exa(api_key=api_key)
+        kwargs: Dict[str, Any] = {"api_key": api_key}
+        base = provider_env("EXA_API_URL") or provider_env("EXA_BASE_URL")
+        if base:
+            kwargs["base_url"] = base
+        try:
+            client = Exa(**kwargs)
+        except TypeError:
+            client = Exa(api_key=api_key)
         client.headers["x-exa-integration"] = "hermes-agent"
         return client
 
-    return cached_sdk_client("_exa_client", "EXA_API_KEY", _MISSING_KEY, "search.exa", _factory)
+    target = provider_env("EXA_API_URL") or provider_env("EXA_BASE_URL")
+    return cached_sdk_client(
+        "_exa_client", "EXA_API_KEY", _MISSING_KEY, "search.exa", _factory,
+        vendor="exa", target_url=target,
+    )
 
 
 class ExaWebSearchProvider(BaseWebSearchProvider):
@@ -40,7 +51,13 @@ class ExaWebSearchProvider(BaseWebSearchProvider):
 
     def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
         def _body() -> Dict[str, Any]:
-            if use_keyless("exa", provider_env("EXA_API_KEY")):
+            from hermes_cli.billing_wallet import web_company_secret
+
+            target = provider_env("EXA_API_URL") or provider_env("EXA_BASE_URL")
+            key = web_company_secret(
+                backend="exa", company_secret=provider_env("EXA_API_KEY"), target_url=target,
+            )
+            if use_keyless("exa", key):
                 return keyless_search("Exa", "exa", query, limit, logger)
             logger.info("Exa search: '%s' (limit=%d)", query, limit)
             response = _get_exa_client().search(query, num_results=limit, contents={"highlights": True})
@@ -53,7 +70,13 @@ class ExaWebSearchProvider(BaseWebSearchProvider):
 
     def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:
         def _body() -> List[Dict[str, Any]]:
-            if use_keyless("exa", provider_env("EXA_API_KEY")):
+            from hermes_cli.billing_wallet import web_company_secret
+
+            target = provider_env("EXA_API_URL") or provider_env("EXA_BASE_URL")
+            key = web_company_secret(
+                backend="exa", company_secret=provider_env("EXA_API_KEY"), target_url=target,
+            )
+            if use_keyless("exa", key):
                 return keyless_extract("Exa", "exa", urls, logger)
             logger.info("Exa extract: %d URL(s)", len(urls))
             response = _get_exa_client().get_contents(urls, text=True)

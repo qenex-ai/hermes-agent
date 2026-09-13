@@ -33,10 +33,17 @@ class TestNoCredentialsNoSwitch:
     def test_openrouter_only_model_stays_when_no_openrouter_key(self, no_live_catalog, authed):
         assert models.detect_provider_for_model("some-model-only-openrouter-has", "deepseek") is None
 
-    def test_openrouter_remap_allowed_with_key(self, no_live_catalog, authed):
+    def test_openrouter_key_is_not_consent_to_remap(self, no_live_catalog, authed, monkeypatch):
+        """Holding OPENROUTER_API_KEY must not auto-hop a native session onto OpenRouter."""
+        monkeypatch.setattr("hermes_cli.billing_wallet.billing_wallet_bind_enabled", lambda: True)
         authed.add("openrouter")
-        assert models.detect_provider_for_model("some-model-only-openrouter-has", "deepseek") == (
-            "openrouter", "vendor/some-model-only-openrouter-has")
+        assert models.detect_provider_for_model("some-model-only-openrouter-has", "deepseek") is None
+
+    def test_explicit_openrouter_prefix_still_remaps_with_key(self, no_live_catalog, authed, monkeypatch):
+        monkeypatch.setattr("hermes_cli.billing_wallet.billing_wallet_bind_enabled", lambda: True)
+        authed.add("openrouter")
+        got = models.detect_provider_for_model("openrouter/some-model-only-openrouter-has", "deepseek")
+        assert got is not None and got[0] == "openrouter"
 
     def test_static_vendor_match_requires_that_vendors_credentials(self, no_live_catalog, authed, monkeypatch):
         monkeypatch.setattr(models, "detect_static_provider_for_model", lambda n, c: ("anthropic", n))

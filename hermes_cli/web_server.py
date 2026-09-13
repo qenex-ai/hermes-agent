@@ -1390,8 +1390,12 @@ def start_server(
     # Dashboard-mode starts don't route through main.py's `serve` path, which
     # applies the same RLIMIT_NOFILE floor (policy in resource_limits, #81547).
     from hermes_cli.resource_limits import apply_nofile_soft_limit
+    from hermes_constants import apply_ipv4_preference
 
     apply_nofile_soft_limit()
+    # Dashboard can be spawned without main.py's early force_ipv4 read.
+    # Auto-patches when IPv6 sockets are missing (xAI OAuth errno 97).
+    apply_ipv4_preference()
 
     import uvicorn  # noqa: F401 — fail fast (before any side effects) when the dashboard extra is missing
 

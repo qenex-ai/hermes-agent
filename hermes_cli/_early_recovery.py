@@ -349,12 +349,81 @@ def _pytest_owns_live_checkout(root: Path) -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ and root == Path(__file__).resolve().parent.parent
 
 
+def _heal_missing_origin(root: Path) -> None:
+    """Restore a missing ``origin`` remote on every launch. Never raises.
+
+    ``hermes update`` cannot pull a fix into a checkout that cannot
+    ``git fetch origin``. The TUI / CLI start this on every ``hermes``
+    invocation, so origin is healed before the user even runs update.
+    Stdlib + ``update_cmd_git`` helpers only — never import ``update_cmd``
+    or ``main`` (this runs before ``main`` finishes importing).
+    """
+    try:
+        if not (root / ".git").exists():
+            return
+        from hermes_cli.update_cmd_git import (
+            OFFICIAL_REPO_URL,
+            _candidate_origin_from_remotes,
+            _origin_url_looks_fetchable,
+            _parse_remote_config_urls,
+            _recalled_origin_url,
+            _remember_origin_url,
+        )
+
+        def _git(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                ["git", *args],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+            )
+
+        existing = (_git("config", "--get", "remote.origin.url").stdout or "").strip()
+        if existing and _origin_url_looks_fetchable(existing):
+            _remember_origin_url(existing)
+            return
+        listed = (_git("remote").stdout or "")
+        names = {line.strip() for line in listed.splitlines() if line.strip()}
+        pairs = _parse_remote_config_urls(
+            _git("config", "--get-regexp", r"^remote\..*\.url$").stdout or ""
+        )
+        sibling_names = {n for n in names if n != "origin"} | {n for n, _ in pairs if n != "origin"}
+        picked = _candidate_origin_from_remotes(pairs)
+        if picked is None:
+            recalled = _recalled_origin_url()
+            if recalled:
+                picked = ("last successful update", recalled)
+            elif not sibling_names:
+                picked = ("official Hermes repository", OFFICIAL_REPO_URL)
+            else:
+                return
+        _source, url = picked
+        if "origin" in names:
+            _git("remote", "set-url", "origin", url)
+        else:
+            _git("remote", "add", "origin", url)
+        restored = (_git("config", "--get", "remote.origin.url").stdout or "").strip()
+        if not restored:
+            return
+        print(
+            f"⚠ Restored git remote 'origin' ({restored}) so `hermes update` can fetch.",
+            file=sys.stderr,
+        )
+        _remember_origin_url(restored)
+    except Exception:
+        return
+
+
 def recover_if_needed(project_root: Path | None = None, argv: list[str] | None = None) -> None:
     """Repair wiped core packages so ``hermes_cli.main`` can import at all.
 
-    Fast path (no marker present) is two ``lstat`` calls. Only acts when a recovery marker from a
-    prior ``hermes update`` exists AND an import probe confirms a core package is actually broken.
-    Never raises: on any failure the import of main.py proceeds and surfaces the real error.
+    Fast path (no marker present) is two ``lstat`` calls plus a local
+    ``git config`` when ``root`` is a git checkout (origin heal). Only the
+    marker path force-reinstalls packages. Never raises: on any failure the
+    import of main.py proceeds and surfaces the real error.
     """
     global _UPDATE_RETRY_RECOVERED
 
@@ -363,6 +432,7 @@ def recover_if_needed(project_root: Path | None = None, argv: list[str] | None =
         root = _project_root() if project_root is None else project_root
         if _pytest_owns_live_checkout(root):
             return
+        _heal_missing_origin(root)
         core_marker = root / ".update-incomplete"
         lazy_marker = root / ".lazy-refresh-incomplete"
         if not core_marker.exists() and not lazy_marker.exists():
@@ -476,6 +546,11 @@ def _complete_pending_core_install(root: Path, core_marker: Path) -> bool:
         if not _claim_recovery_lock(root):
             return False
         try:
+            if ir._probe_index_unreachable():
+                print("⚠ Package index unreachable — deferring interrupted-install "
+                      "completion this launch. Hermes will keep working from the "
+                      "current venv.", file=sys.stderr)
+                return False
             print("⚠ A previous `hermes update` was interrupted mid-install — "
                   "finishing dependency installation now (before any native "
                   "extensions load)...", file=sys.stderr)

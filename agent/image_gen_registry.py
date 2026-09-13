@@ -41,10 +41,16 @@ def get_active_provider() -> Optional[ImageGenProvider]:
         return is_available_safe(p, logger, "image_gen provider %s.is_available() raised %s")
 
     available = [p for p in snapshot.values() if _available(p)]
+    from hermes_cli.billing_wallet import allow_metered_autoselect
+
+    # Unconfigured auto-pick must not land on a metered vendor just because the company key exists.
+    available = [p for p in available if allow_metered_autoselect(p.name)]
     if len(available) == 1:
         return available[0]
     fal = snapshot.get("fal")
-    return fal if fal is not None and _available(fal) else None
+    if fal is not None and _available(fal) and allow_metered_autoselect("fal"):
+        return fal
+    return None
 
 
 # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----

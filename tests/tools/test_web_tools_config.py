@@ -91,7 +91,8 @@ class TestFirecrawlClientConfig:
     def test_constructor_failure_allows_retry(self):
         """If Firecrawl() raises, next call should retry (not return None)."""
         import tools.web_tools
-        with patch.dict(os.environ, {"FIRECRAWL_API_KEY": "fc-test"}):
+        with patch("plugins.web.keyless_mcp._web_config_selects", lambda name: name == "firecrawl"), \
+             patch.dict(os.environ, {"FIRECRAWL_API_KEY": "fc-test"}):
             with patch("plugins.web.firecrawl.provider.Firecrawl") as mock_fc:
                 mock_fc.side_effect = [RuntimeError("init failed"), MagicMock()]
                 from plugins.web.firecrawl.provider import _get_firecrawl_client
@@ -240,78 +241,70 @@ class TestBackendSelection:
 
     # ── Fallback (no web.backend in config) ───────────────────────────
 
-    def test_fallback_parallel_only_key(self):
-        """Only PARALLEL_API_KEY set → 'parallel'."""
+    def _never_configured(self, **env):
+        """Never-configured install: no keyless, no gateway, no ddgs."""
+        return (
+            patch("tools.web_tools._load_web_config", return_value={}),
+            patch("tools.web_tools._is_tool_gateway_ready", return_value=False),
+            patch("tools.web_tools._ddgs_package_importable", return_value=False),
+            patch("tools.web_tools._list_registered_web_providers", return_value=[]),
+            patch("agent.web_search_registry._keyless_tier_enabled", return_value=False),
+            patch.dict(os.environ, env, clear=False),
+        )
+
+    def test_fallback_parallel_only_key_does_not_autoselect(self):
+        """PARALLEL_API_KEY sitting unused is not consent to spend Parallel."""
         from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
+        patches = self._never_configured(PARALLEL_API_KEY="test-key")
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _get_backend() != "parallel"
+            assert _get_backend() == "firecrawl"
+
+    def test_fallback_exa_only_key_does_not_autoselect(self):
+        from tools.web_tools import _get_backend
+        patches = self._never_configured(EXA_API_KEY="exa-test")
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _get_backend() != "exa"
+
+    def test_fallback_metered_keys_do_not_rank_each_other(self):
+        """Company Exa + Parallel keys must not auto-pick either vendor."""
+        from tools.web_tools import _get_backend
+        patches = self._never_configured(EXA_API_KEY="exa-test", PARALLEL_API_KEY="par-test")
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _get_backend() not in {"exa", "parallel", "tavily", "keenable"}
+
+    def test_fallback_keenable_only_key_does_not_autoselect(self):
+        from tools.web_tools import _get_backend
+        patches = self._never_configured(KEENABLE_API_KEY="kn-test")
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _get_backend() != "keenable"
+
+    def test_fallback_tavily_only_key_does_not_autoselect(self):
+        from tools.web_tools import _get_backend
+        patches = self._never_configured(TAVILY_API_KEY="tvly-test")
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _get_backend() != "tavily"
+
+    def test_fallback_firecrawl_cloud_key_does_not_autoselect(self):
+        """Cloud FIRECRAWL_API_KEY without a stored pick does not spend Firecrawl."""
+        from tools.web_tools import _get_backend
+        patches = self._never_configured(FIRECRAWL_API_KEY="fc-test")
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _get_backend() == "firecrawl"  # sentinel, not a spend — no key used until dispatch
+
+    def test_fallback_firecrawl_self_hosted_url_autoselects(self):
+        """Operator-owned FIRECRAWL_API_URL is infrastructure, not a company-cloud hop."""
+        from tools.web_tools import _get_backend
+        patches = self._never_configured(FIRECRAWL_API_URL="http://localhost:3002")
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _get_backend() == "firecrawl"
+
+    def test_fallback_bind_disabled_restores_key_autoselect(self):
+        from tools.web_tools import _get_backend
+        with patch("hermes_cli.billing_wallet.billing_wallet_bind_enabled", return_value=False), \
+             patch("tools.web_tools._load_web_config", return_value={}), \
              patch.dict(os.environ, {"PARALLEL_API_KEY": "test-key"}):
             assert _get_backend() == "parallel"
-
-    def test_fallback_exa_only_key(self):
-        """Only EXA_API_KEY set → 'exa'."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"EXA_API_KEY": "exa-test"}):
-            assert _get_backend() == "exa"
-
-    def test_fallback_exa_takes_priority_over_parallel(self):
-        """Direct-credential backends are tried in the order tavily > exa > parallel > keenable
-        so an explicit Exa key wins when both Exa and Parallel are configured."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"EXA_API_KEY": "exa-test", "PARALLEL_API_KEY": "par-test"}):
-            assert _get_backend() == "exa"
-
-    def test_fallback_keenable_only_key(self):
-        """Only KEENABLE_API_KEY set → 'keenable'."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"KEENABLE_API_KEY": "kn-test"}):
-            assert _get_backend() == "keenable"
-
-    def test_fallback_exa_beats_firecrawl_direct(self):
-        """Exa ranks above firecrawl in the explicit-credential block."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"EXA_API_KEY": "exa-test", "FIRECRAWL_API_KEY": "fc-test"}):
-            assert _get_backend() == "exa"
-
-    def test_fallback_tavily_only_key(self):
-        """Only TAVILY_API_KEY set → 'tavily'."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test"}):
-            assert _get_backend() == "tavily"
-
-    def test_fallback_tavily_beats_firecrawl_direct(self):
-        """Tavily ranks above firecrawl in the explicit-credential block."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test", "FIRECRAWL_API_KEY": "fc-test"}):
-            assert _get_backend() == "tavily"
-
-    def test_fallback_tavily_beats_exa(self):
-        """Tavily ranks above Exa in the explicit-credential block."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test", "EXA_API_KEY": "exa-test"}):
-            assert _get_backend() == "tavily"
-
-
-    def test_fallback_parallel_beats_firecrawl_direct(self):
-        """Parallel + Firecrawl-direct → parallel (parallel is the higher-priority
-        explicit-credential backend; firecrawl-direct ranks below it)."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"PARALLEL_API_KEY": "test-key", "FIRECRAWL_API_KEY": "fc-test"}):
-            assert _get_backend() == "parallel"
-
-    def test_fallback_firecrawl_only_key(self):
-        """Only FIRECRAWL_API_KEY set → 'firecrawl'."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch.dict(os.environ, {"FIRECRAWL_API_KEY": "fc-test"}):
-            assert _get_backend() == "firecrawl"
 
     def test_fallback_no_keys_defaults_to_firecrawl(self):
         """No keys, no config, keyless tier off → 'firecrawl' sentinel.
@@ -352,34 +345,22 @@ class TestBackendSelection:
         with patch("tools.web_tools._load_web_config", return_value={"backend": "nous"}):
             assert _get_backend() == "firecrawl"
 
-    def test_managed_gateway_does_not_preempt_explicit_exa(self):
-        """Regression: a Nous OAuth token (managed gateway "ready") must NOT
-        beat an explicitly configured EXA_API_KEY in the fallback path.
-        Free Nous tiers don't include web search, so the user's deliberate
-        Exa setup would fail at runtime with "no subscription" if the
-        gateway pre-empted it."""
+    def test_managed_gateway_does_not_autoselect_when_bind_enabled(self):
+        """Nous gateway readiness is not consent to spend the subscription on
+        a never-configured session. Pick firecrawl/nous in ``hermes tools``."""
         from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
+        patches = self._never_configured()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
              patch("tools.web_tools._is_tool_gateway_ready", return_value=True), \
              patch.dict(os.environ, {"EXA_API_KEY": "exa-test"}):
-            assert _get_backend() == "exa"
-
-    def test_managed_gateway_does_not_preempt_explicit_tavily(self):
-        """A Nous OAuth token must not beat an explicit TAVILY_API_KEY."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch("tools.web_tools._is_tool_gateway_ready", return_value=True), \
-             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test"}):
-            assert _get_backend() == "tavily"
-
-    def test_managed_gateway_only_falls_through_to_firecrawl(self):
-        """When no explicit-credential backend is configured, a Nous-managed
-        gateway token still selects firecrawl — the convenience path is
-        preserved, just no longer pre-empts."""
-        from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}), \
-             patch("tools.web_tools._is_tool_gateway_ready", return_value=True):
+            assert _get_backend() != "exa"
             assert _get_backend() == "firecrawl"
+
+    def test_stored_exa_still_selected_with_gateway_ready(self):
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={"backend": "exa"}), \
+             patch("tools.web_tools._is_tool_gateway_ready", return_value=True):
+            assert _get_backend() == "exa"
 
 
 class TestParallelClientConfig:
@@ -392,22 +373,34 @@ class TestParallelClientConfig:
         fake_parallel = types.ModuleType("parallel")
 
         class Parallel:
-            def __init__(self, api_key):
+            def __init__(self, api_key, **kwargs):
                 self.api_key = api_key
+                self.kwargs = kwargs
 
         class AsyncParallel:
-            def __init__(self, api_key):
+            def __init__(self, api_key, **kwargs):
                 self.api_key = api_key
+                self.kwargs = kwargs
 
         fake_parallel.Parallel = Parallel
         fake_parallel.AsyncParallel = AsyncParallel
         sys.modules["parallel"] = fake_parallel
+        self._select = patch(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name == "parallel",
+        )
+        self._select.start()
+        # sys.modules already holds the fake SDK; skip the lazy-install probe.
+        self._lazy = patch("plugins.web._common.lazy_ensure", lambda feature: None)
+        self._lazy.start()
 
     def teardown_method(self):
         import tools.web_tools
         tools.web_tools._parallel_client = None
         os.environ.pop("PARALLEL_API_KEY", None)
         sys.modules.pop("parallel", None)
+        self._select.stop()
+        self._lazy.stop()
 
     def test_creates_client_with_key(self):
         """PARALLEL_API_KEY set → creates Parallel client."""
@@ -759,6 +752,9 @@ class TestFirecrawlEnvResolution:
 
         fake_key = "fc-test-key-from-dotenv"
         with patch(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name == "firecrawl",
+        ), patch(
             "hermes_cli.config.get_env_value",
             side_effect=lambda k: fake_key if k == "FIRECRAWL_API_KEY" else None,
         ):
@@ -837,6 +833,9 @@ class TestSiblingProvidersEnvResolution:
             "hermes_cli.config.get_env_value",
             side_effect=lambda k: "kn-from-dotenv" if k == "KEENABLE_API_KEY" else None,
         ), patch(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name == "keenable",
+        ), patch(
             "requests.post", return_value=mock_response
         ) as mock_post:
             from plugins.web.keenable.provider import KeenableWebSearchProvider
@@ -857,6 +856,9 @@ class TestSiblingProvidersEnvResolution:
         with patch(
             "hermes_cli.config.get_env_value",
             side_effect=lambda k: "tvly-from-dotenv" if k == "TAVILY_API_KEY" else None,
+        ), patch(
+            "plugins.web.keyless_mcp._web_config_selects",
+            lambda name: name == "tavily",
         ), patch(
             "plugins.web.tavily.provider.httpx.post", return_value=mock_response
         ) as mock_post:

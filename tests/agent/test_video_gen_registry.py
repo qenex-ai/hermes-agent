@@ -58,18 +58,21 @@ class TestGetActiveProvider:
 
 
 
-    def test_single_available_among_many_autoresolves(self, tmp_path, monkeypatch):
-        """When several providers are registered but only one has credentials
-        (is_available()), that one is auto-selected without config. This is the
-        DeepInfra-only-box case: fal/xai register unconditionally but lack keys.
-        Mirrors agent/image_gen_registry's availability-filtered fallback.
-        """
+    def test_single_metered_available_does_not_autoresolve(self, tmp_path, monkeypatch):
+        """A box with only DeepInfra credentials must not auto-spend them.
+        Pick the backend in ``hermes tools``."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         video_gen_registry.register_provider(_FakeProvider("fal", available=False))
         video_gen_registry.register_provider(_FakeProvider("xai", available=False))
         video_gen_registry.register_provider(_FakeProvider("deepinfra", available=True))
+        assert video_gen_registry.get_active_provider() is None
+
+    def test_single_unmetered_available_still_autoresolves(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        video_gen_registry.register_provider(_FakeProvider("comfyui", available=True))
+        video_gen_registry.register_provider(_FakeProvider("fal", available=False))
         active = video_gen_registry.get_active_provider()
-        assert active is not None and active.name == "deepinfra"
+        assert active is not None and active.name == "comfyui"
 
 
     def test_unknown_explicit_config_fails_closed(self, tmp_path, monkeypatch):

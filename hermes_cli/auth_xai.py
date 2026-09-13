@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
 from urllib.parse import urlparse
@@ -266,9 +267,29 @@ def _xai_validate_inference_base_url(value: str, *, fallback: str) -> str:
     return fallback
 
 
+def _xai_http_client(**kwargs: Any) -> "httpx.Client":
+    """Build an ``httpx.Client`` for xAI OAuth with Happy-Eyeballs racing.
+
+    ``auth.x.ai`` is dual-stack. Hosts that advertise AAAA but cannot complete
+    IPv6 connects (EAFNOSUPPORT / ENETUNREACH — typical Docker/cloud VMs) make
+    serial ``create_connection`` fail or burn the timeout before IPv4 is tried.
+    Same RFC 8305 backend as Codex OAuth. Best-effort: mocked clients in tests
+    keep serial connect behavior.
+    """
+    client = httpx.Client(**kwargs)
+    with suppress(Exception):
+        from agent.process_bootstrap import enable_happy_eyeballs_on_client
+        enable_happy_eyeballs_on_client(client)
+    return client
+
+
 def _xai_oauth_discovery(timeout_seconds: float = 15.0) -> Dict[str, str]:
     try:
-        response = httpx.get(XAI_OAUTH_DISCOVERY_URL, headers={"Accept": "application/json"}, timeout=timeout_seconds)
+        with _xai_http_client(
+            timeout=max(5.0, float(timeout_seconds)),
+            headers={"Accept": "application/json"},
+        ) as client:
+            response = client.get(XAI_OAUTH_DISCOVERY_URL)
     except Exception as exc:
         raise _xai_err(f"xAI OIDC discovery failed: {exc}", "xai_discovery_failed") from exc
     if response.status_code != 200:
@@ -312,7 +333,7 @@ def refresh_xai_oauth_pure(
     # that would otherwise receive every future refresh_token.
     _xai_validate_oauth_endpoint(endpoint, field="token_endpoint")
     timeout = httpx.Timeout(max(5.0, float(timeout_seconds)))
-    with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}) as client:
+    with _xai_http_client(timeout=timeout, headers={"Accept": "application/json"}) as client:
         response = client.post(
             endpoint, headers={"Content-Type": "application/x-www-form-urlencoded"},
             data={"grant_type": "refresh_token", "client_id": XAI_OAUTH_CLIENT_ID, "refresh_token": refresh_token},
@@ -556,7 +577,7 @@ def _xai_oauth_device_code_login(*, timeout_seconds: float = 20.0, open_browser:
     from hermes_cli.auth import _can_open_graphical_browser, _is_remote_session, _print_device_code_instructions, _utc_now_z, _xai_oauth_discovery, _xai_oauth_poll_device_token
     discovery = _xai_oauth_discovery(timeout_seconds)
     timeout = httpx.Timeout(max(20.0, timeout_seconds))
-    with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}) as client:
+    with _xai_http_client(timeout=timeout, headers={"Accept": "application/json"}) as client:
         device_data = _xai_oauth_request_device_code(client)
         interval = int(device_data["interval"])
         _print_device_code_instructions(

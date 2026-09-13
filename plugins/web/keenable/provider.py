@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 _KEENABLE_API_URL = "https://api.keenable.ai"
 
 
+def _keenable_api_url() -> str:
+    return provider_env("KEENABLE_API_URL") or provider_env("KEENABLE_BASE_URL") or _KEENABLE_API_URL
+
+
+def _keenable_key(api_key: str) -> str:
+    from hermes_cli.billing_wallet import web_company_secret
+
+    return web_company_secret(backend="keenable", company_secret=api_key or "", target_url=_keenable_api_url())
+
+
 def _keenable_headers(api_key: str) -> Dict[str, str]:
     # The keyless tier structurally requires an app-identifier header; no user identifiers are sent.
     headers = {"X-Keenable-Title": "hermes-agent"}
@@ -38,13 +48,13 @@ class KeenableWebSearchProvider(BaseWebSearchProvider):
 
     def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
         def _body() -> Dict[str, Any]:
-            api_key = provider_env("KEENABLE_API_KEY")
+            api_key = _keenable_key(provider_env("KEENABLE_API_KEY"))
             if use_keyless("keenable", api_key):
                 return keyless_search("Keenable", "keenable", query, limit, logger)
             import requests
             logger.info("Keenable search: '%s' (limit=%d)", query, limit)
             response = requests.post(
-                f"{_KEENABLE_API_URL}/v1/search",
+                f"{_keenable_api_url()}/v1/search",
                 json={"query": query, "max_results": min(max(1, int(limit)), SEARCH_LIMIT_CAP)},
                 headers=_keenable_headers(api_key), timeout=30,
             )
@@ -59,7 +69,7 @@ class KeenableWebSearchProvider(BaseWebSearchProvider):
 
     def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:
         def _body() -> List[Dict[str, Any]]:
-            api_key = provider_env("KEENABLE_API_KEY")
+            api_key = _keenable_key(provider_env("KEENABLE_API_KEY"))
             if use_keyless("keenable", api_key):
                 return keyless_extract("Keenable", "keenable", urls, logger)
             import requests
@@ -67,7 +77,7 @@ class KeenableWebSearchProvider(BaseWebSearchProvider):
             results: List[Dict[str, Any]] = []
             for url in urls:
                 try:
-                    response = requests.get(f"{_KEENABLE_API_URL}/v1/fetch", params={"url": url}, headers=_keenable_headers(api_key), timeout=30)
+                    response = requests.get(f"{_keenable_api_url()}/v1/fetch", params={"url": url}, headers=_keenable_headers(api_key), timeout=30)
                     if response.status_code >= 400:
                         raise ValueError(http_status_detail(response))
                     data = response.json()

@@ -113,6 +113,7 @@ If a skill is missing from this list but present in the repo, the catalog is reg
 | Skill | Description | Path |
 |-------|-------------|------|
 | [`codebase-inspection`](/docs/user-guide/skills/bundled/software-development/software-development-codebase-inspection) | Inspect codebases w/ pygount: LOC, languages, ratios. | `software-development\codebase-inspection` |
+| [`cursor-sdk`](/docs/user-guide/skills/bundled/software-development/software-development-cursor-sdk) | Run Cursor SDK agents with prompt, send, or resume. | `software-development/cursor-sdk` |
 | [`dogfood`](/docs/user-guide/skills/bundled/software-development/software-development-dogfood) | Exploratory QA of web apps: find bugs, evidence, reports. | `software-development\dogfood` |
 | [`github`](/docs/user-guide/skills/bundled/software-development/software-development-github) | GitHub via gh CLI: PRs, issues, reviews, repos, auth. | `software-development\github` |
 | [`hermes-agent-skill-authoring`](/docs/user-guide/skills/bundled/software-development/software-development-hermes-agent-skill-authoring) | Author in-repo SKILL.md files: frontmatter and structure. | `software-development\hermes-agent-skill-authoring` |

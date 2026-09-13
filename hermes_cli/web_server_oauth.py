@@ -399,14 +399,13 @@ def _minimax_poller(session_id: str, sess: Dict[str, Any]) -> None:
 def _xai_device_poller(session_id: str, sess: Dict[str, Any]) -> None:
     """Background poller for xAI's OAuth device-code flow."""
     from hermes_cli.web_server_profiles import _profile_scope
-    import httpx
     from hermes_cli.auth import (
-        _save_xai_oauth_tokens, _xai_oauth_discovery, _xai_oauth_poll_device_token,
+        _save_xai_oauth_tokens, _xai_http_client, _xai_oauth_discovery, _xai_oauth_poll_device_token,
         mark_provider_active_if_unset, unsuppress_credential_source,
     )
 
     discovery = _xai_oauth_discovery(20.0)
-    with httpx.Client(timeout=httpx.Timeout(20.0), headers={"Accept": "application/json"}) as client:
+    with _xai_http_client(timeout=20.0, headers={"Accept": "application/json"}) as client:
         token_data = _xai_oauth_poll_device_token(
             client, token_endpoint=discovery["token_endpoint"], device_code=sess["device_code"],
             expires_in=max(60, int(sess["expires_at"] - time.time())), poll_interval=int(sess["interval"]),
