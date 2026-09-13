@@ -1,6 +1,6 @@
 # QENEX LTD London — Hermes runtime contract
 # Verified 2026-09-13 from Cursor Ultra + live MCP (mcp.qenex.ai) + public probes.
-# Companion Cursor Ultra PR: https://github.com/qenex-ai/cursor/pull/82
+# Companion Cursor Ultra: PR #82 merged; ranking follow-up https://github.com/qenex-ai/cursor/pull/83
 #
 # Canonical OpenClaw is https://claw.qenex.ai (TLS Let's Encrypt YE1, Keycloak SSO 302).
 # hermes.qenex.ai has TLS (YE2) and HTTPS 301s to claw.
@@ -15,6 +15,10 @@
 # qenex-edge #89 baked llm/registrar/agents/pinata/email/webmail/domains/rekor.
 # Remaining missing SNI: identity.qenex.ai, sso.qenex.ai, lco.qenex.ai.
 # Never reverse_proxy LCO :8855/:8856. Never Caddy-expose Keycloak /admin or realm master.
+#
+# Grok Bot (PR #83) ranks remaining SNI first on every turn (no live probe).
+# Bake from a CLEAN origin/main worktree. London cwd docs/failed-services-triage-2026-09-06
+# is dirty and caused qenex-forgejo-sync non-fast-forward at 17:06Z — do not force-push it.
 
 operator: QENEX LTD London
 company_number: "16523814"
@@ -40,6 +44,8 @@ grok:
   models: [cursor-grok, composer]
   london_mcp_active_provider: ollama
   do_not_call: [https://api.x.ai/v1, grok-4, qenex_provider_switch]
+  estate_rank: remaining SNI identity/sso/lco first
+  cursor_pr_ranking: https://github.com/qenex-ai/cursor/pull/83
 
 lab:
   base: https://lab.qenex.ai
@@ -53,6 +59,7 @@ git:
   github_org: https://github.com/qenex-ai
   this_repo: qenex-ai/hermes-agent
   caddy_source_of_truth: git.qenex.ai/root/qenex-edge
+  never_force_push: docs/failed-services-triage-2026-09-06
 
 identity:
   canonical: https://auth.qenex.ai
@@ -108,7 +115,9 @@ caddy_bake:
   pattern: append infra/caddy/Caddyfile.tmpl + generated Caddyfile (PRs #85 ultra, #86 claw, #87 hermes, #89 eight)
   snippet: qenex-ai/cursor ops/london/missing-sni.caddy
   apply: qenex-ai/cursor ops/london/apply-remaining-sni.sh
+  branch: ops/bake-identity-sso-lco
   site_provisioner: create_site always mkdir /var/www/<domain> and fails ENOENT; do not use for remaining SNI
+  worktree: CLEAN origin/main; never the stale triage cwd
   live_do_not_duplicate:
     - claw.qenex.ai
     - hermes.qenex.ai
@@ -142,3 +151,7 @@ missing_sni:
     - claw.qenex.ai
     - hermes.qenex.ai
   caddy_snippet_in_cursor_ultra: ops/london/missing-sni.caddy
+
+systemd_not_yet_live:
+  qenex-forgejo-sync: failed 2026-09-13T17:06Z non-fast-forward root/qenex-edge; drop-in only 50-alert-onfailure.conf; install forgejo-sync-isolated.sh + 60-isolate-repos.conf
+  qenex-deadline-monitor: failed 2026-09-13T12:08Z PermissionError /etc/qenex/deadlines.yml; install ops/london/deadline_monitor.py (EACCES exit 0)
