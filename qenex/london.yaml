@@ -1,15 +1,18 @@
 # QENEX LTD London — Hermes runtime contract
-# Verified 2026-09-13 from Cursor Ultra + live MCP (mcp.qenex.ai v45).
+# Verified 2026-09-13 from Cursor Ultra + live MCP (mcp.qenex.ai) + public probes.
 #
-# Self-hosted hostnames hermes.qenex.ai and llm.qenex.ai resolve via
-# wildcard *.qenex.ai A 198.244.164.221 but have no Caddy TLS vhost
-# (OpenSSL alert 80). systemd units hermes-agent and qenex-hermes are
-# inactive. Do not send OpenAI-compatible traffic there until ops applies
-# ops/london/missing-sni.caddy from qenex-ai/cursor and starts the unit.
+# Canonical OpenClaw is https://claw.qenex.ai (TLS Let's Encrypt YE1, Keycloak SSO 302).
+# hermes.qenex.ai now has TLS (YE2, issued 2026-09-13) and HTTPS 301s to claw.
+# Call the OpenAI-compatible API on claw, not the alias:
+#   POST https://claw.qenex.ai/v1/chat/completions  → 401 without SSO/token
+# systemd unit openclaw-gateway.service is not-found; the app is still served via Caddy.
 #
-# Until then: run this checkout locally (or on a loopback bind) and talk
-# to the London stack through MCP origin POST https://mcp.qenex.ai/
-# (POST /mcp is 404). Cursor Ultra (qenex-ai/cursor) is the operator console.
+# MCP origin is POST https://mcp.qenex.ai/ (initialize then tools/list). POST /mcp is 404.
+# Cursor Ultra (qenex-ai/cursor) is the operator console.
+#
+# Billing: Cursor Ultra included models only (Cursor Grok + Composer).
+# Do NOT call api.x.ai, grok-4 on-demand, OpenAI keys, or qenex_provider_switch.
+# London MCP active_provider is ollama.
 
 operator: QENEX LTD London
 company_number: "16523814"
@@ -17,16 +20,25 @@ company_number: "16523814"
 mcp:
   origin: https://mcp.qenex.ai
   jsonrpc: POST /
+  initialize_then: tools/list
   sse: GET /sse
   oauth_resource: https://mcp.qenex.ai
   do_not_use: POST /mcp
 
+openclaw:
+  canonical: https://claw.qenex.ai
+  alias: https://hermes.qenex.ai
+  alias_behavior: HTTPS 301 to https://claw.qenex.ai/
+  chat_completions: https://claw.qenex.ai/v1/chat/completions
+  sso: /api/sso/login
+  gateway_port: 18789
+
 grok:
-  # Preferred reasoning plane for Cursor Ultra. London MCP active_provider
-  # is currently ollama; openai_compat can target xAI without switching the fleet.
-  base_url: https://api.x.ai/v1
-  model: grok-4
-  env: XAI_API_KEY
+  # Editor inference stays on Cursor Ultra included models. Never api.x.ai.
+  billing: included-in-ultra
+  models: [cursor-grok, composer]
+  london_mcp_active_provider: ollama
+  do_not_call: [https://api.x.ai/v1, grok-4, qenex_provider_switch]
 
 lab:
   base: https://lab.qenex.ai
@@ -35,6 +47,8 @@ lab:
 
 git:
   forgejo: https://git.qenex.ai
+  public_ui: GET /
+  api_requires_token: /api/v1/*
   github_org: https://github.com/qenex-ai
   this_repo: qenex-ai/hermes-agent
 
@@ -43,6 +57,7 @@ ipfs:
   london_kubo_peer: 12D3KooWRfLHg4wGktiyb2M4hQ8dMJMft6Jg1Qo8djb1kuZGDS7n
   evidence: https://ipfs.qenex.ai
   dead_vhost: https://pinata.qenex.ai
+  pin_add: qenex_ipfs_pin_add  # CID argument, dry_run default; not JSON
 
 mail:
   canonical: mail.qenex.ai
@@ -64,7 +79,6 @@ brain:
   grok_seat: grok
 
 missing_sni:
-  - hermes.qenex.ai
   - llm.qenex.ai
   - registrar.qenex.ai
   - agents.qenex.ai
@@ -73,5 +87,8 @@ missing_sni:
   - webmail.qenex.ai
   - domains.qenex.ai
   - rekor.qenex.ai
+  live_do_not_duplicate:
+    - claw.qenex.ai
+    - hermes.qenex.ai
   caddy_snippet_in_cursor_ultra: ops/london/missing-sni.caddy
   rekor_loopback: 127.0.0.1:8294
