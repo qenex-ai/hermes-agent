@@ -1,18 +1,20 @@
 # QENEX LTD London — Hermes runtime contract
 # Verified 2026-09-13 from Cursor Ultra + live MCP (mcp.qenex.ai) + public probes.
+# Companion Cursor Ultra PR: https://github.com/qenex-ai/cursor/pull/82
 #
 # Canonical OpenClaw is https://claw.qenex.ai (TLS Let's Encrypt YE1, Keycloak SSO 302).
-# hermes.qenex.ai now has TLS (YE2, issued 2026-09-13) and HTTPS 301s to claw.
+# hermes.qenex.ai has TLS (YE2) and HTTPS 301s to claw.
 # Call the OpenAI-compatible API on claw, not the alias:
 #   POST https://claw.qenex.ai/v1/chat/completions  → 401 without SSO/token
-# systemd unit openclaw-gateway.service is not-found; the app is still served via Caddy.
 #
 # MCP origin is POST https://mcp.qenex.ai/ (initialize then tools/list). POST /mcp is 404.
-# Cursor Ultra (qenex-ai/cursor) is the operator console.
-#
 # Billing: Cursor Ultra included models only (Cursor Grok + Composer).
 # Do NOT call api.x.ai, grok-4 on-demand, OpenAI keys, or qenex_provider_switch.
-# London MCP active_provider is ollama.
+# London MCP active_provider and LCO reasoner stay on ollama.
+#
+# qenex-edge #89 baked llm/registrar/agents/pinata/email/webmail/domains/rekor.
+# Remaining missing SNI: identity.qenex.ai, sso.qenex.ai, lco.qenex.ai.
+# Never reverse_proxy LCO :8855/:8856. Never Caddy-expose Keycloak /admin or realm master.
 
 operator: QENEX LTD London
 company_number: "16523814"
@@ -34,7 +36,6 @@ openclaw:
   gateway_port: 18789
 
 grok:
-  # Editor inference stays on Cursor Ultra included models. Never api.x.ai.
   billing: included-in-ultra
   models: [cursor-grok, composer]
   london_mcp_active_provider: ollama
@@ -53,25 +54,45 @@ git:
   this_repo: qenex-ai/hermes-agent
   caddy_source_of_truth: git.qenex.ai/root/qenex-edge
 
+identity:
+  canonical: https://auth.qenex.ai
+  realm: qenex
+  oidc: https://auth.qenex.ai/realms/qenex/.well-known/openid-configuration
+  access_token_lifespan_sec: 300
+  registration_allowed: false
+  aliases_missing_sni: [identity.qenex.ai, sso.qenex.ai]
+  bake: 301 identity.qenex.ai and sso.qenex.ai → https://auth.qenex.ai{uri}
+  do_not_expose: [realm master, /admin]
+
+lco:
+  name: Living Cognitive OS
+  sense: http://127.0.0.1:8855
+  cache: http://127.0.0.1:8856
+  reasoner_backend: ollama
+  public_alias: https://lco.qenex.ai
+  bake: 301 lco.qenex.ai → https://lab.qenex.ai{uri}
+  never_reverse_proxy: [8855, 8856]
+  agent_bus_seat_is_not_this_os: lco
+  dispatch_seat: mcp
+  tools: [qenex_lco_probe, qenex_lco_brain_status, qenex_lco_brain_observe, qenex_lco_brain_recommend]
+
 ipfs:
   pinata_api: https://api.pinata.cloud
   london_kubo_peer: 12D3KooWRfLHg4wGktiyb2M4hQ8dMJMft6Jg1Qo8djb1kuZGDS7n
   evidence: https://ipfs.qenex.ai
-  dead_vhost: https://pinata.qenex.ai
+  pinata_alias_live: HTTPS 301 pinata.qenex.ai → https://qenex.ai/legal/evidence/
   pin_add: qenex_ipfs_pin_add  # CID argument, dry_run default; not JSON
-  bake_pinata_vhost: 301 to https://qenex.ai/legal/evidence/  # never reverse_proxy api.pinata.cloud
 
 mail:
   canonical: mail.qenex.ai
   imap: { host: mail.qenex.ai, port: 993, tls: true }
   smtp: { host: mail.qenex.ai, port: 587, starttls: true }
-  not: [email.qenex.ai, webmail.qenex.ai]
-  bake_aliases: 301 email.qenex.ai and webmail.qenex.ai → mail.qenex.ai
+  aliases_live: HTTPS 301 email.qenex.ai and webmail.qenex.ai → mail.qenex.ai
 
 registrar:
   public_rdap: https://rdap.qenex.ai
-  operator_vhost_missing_sni: https://registrar.qenex.ai
-  bake: 301 registrar.qenex.ai and domains.qenex.ai → rdap.qenex.ai
+  operator_vhost_live: https://registrar.qenex.ai  # TLS HTTP 200 application/rdap+json after qenex-edge #89
+  domains_vhost_live: https://domains.qenex.ai
 
 brain:
   base: https://brain.qenex.ai
@@ -84,33 +105,40 @@ brain:
 
 caddy_bake:
   repo: git.qenex.ai/root/qenex-edge
-  pattern: append infra/caddy/Caddyfile.tmpl + generated Caddyfile (PRs #85 ultra, #86 claw, #87 hermes)
+  pattern: append infra/caddy/Caddyfile.tmpl + generated Caddyfile (PRs #85 ultra, #86 claw, #87 hermes, #89 eight)
   snippet: qenex-ai/cursor ops/london/missing-sni.caddy
   apply: qenex-ai/cursor ops/london/apply-remaining-sni.sh
   site_provisioner: create_site always mkdir /var/www/<domain> and fails ENOENT; do not use for remaining SNI
-  no_mkdir: all remaining names are 301 redir except rekor reverse_proxy 127.0.0.1:8294
-  live_do_not_duplicate: [claw.qenex.ai, hermes.qenex.ai]
+  live_do_not_duplicate:
+    - claw.qenex.ai
+    - hermes.qenex.ai
+    - llm.qenex.ai
+    - registrar.qenex.ai
+    - agents.qenex.ai
+    - pinata.qenex.ai
+    - email.qenex.ai
+    - webmail.qenex.ai
+    - domains.qenex.ai
+    - rekor.qenex.ai
   remaining:
-    llm.qenex.ai: 301 → https://lab.qenex.ai{uri}
-    registrar.qenex.ai: 301 → https://rdap.qenex.ai{uri}
-    agents.qenex.ai: 301 → https://a2a.qenex.ai{uri}
-    pinata.qenex.ai: 301 → https://qenex.ai/legal/evidence/
-    email.qenex.ai: 301 → https://mail.qenex.ai{uri}
-    webmail.qenex.ai: 301 → https://mail.qenex.ai{uri}
-    domains.qenex.ai: 301 → https://rdap.qenex.ai{uri}
-    rekor.qenex.ai: reverse_proxy 127.0.0.1:8294
+    identity.qenex.ai: 301 → https://auth.qenex.ai{uri}
+    sso.qenex.ai: 301 → https://auth.qenex.ai{uri}
+    lco.qenex.ai: 301 → https://lab.qenex.ai{uri}  # never reverse_proxy :8855/:8856
 
 missing_sni:
-  - llm.qenex.ai
-  - registrar.qenex.ai
-  - agents.qenex.ai
-  - pinata.qenex.ai
-  - email.qenex.ai
-  - webmail.qenex.ai
-  - domains.qenex.ai
-  - rekor.qenex.ai
+  - identity.qenex.ai
+  - sso.qenex.ai
+  - lco.qenex.ai
+  baked_in_qenex_edge_89:
+    - llm.qenex.ai
+    - registrar.qenex.ai
+    - agents.qenex.ai
+    - pinata.qenex.ai
+    - email.qenex.ai
+    - webmail.qenex.ai
+    - domains.qenex.ai
+    - rekor.qenex.ai
   live_do_not_duplicate:
     - claw.qenex.ai
     - hermes.qenex.ai
   caddy_snippet_in_cursor_ultra: ops/london/missing-sni.caddy
-  rekor_loopback: 127.0.0.1:8294
