@@ -294,7 +294,9 @@ migration, no orphaned history. Every gateway path that reads a key back —
 delegation completions after a restart, shutdown notices, a per-user-thread
 `/stop` of a sibling's run, `/undo`, QQ approval buttons — accepts the
 `agent:<profile>:…` shape too, so secondary profiles get the same behaviour
-as the default one.
+as the default one. The one profile name that would collide with the default's
+namespace, a profile literally called `main`, is keyed `agent:main~:…` so it
+keeps its own sessions and its own `profiles/main/state.db`.
 
 Each profile's rows land in **its own** `state.db`: a named profile's under
 `profiles/<name>/state.db`, the default profile's under the launch home — even
@@ -331,7 +333,10 @@ route *and* credentials, including mTLS `client_cert`/`client_key`) share one
 connection, and an owner's `/reload-mcp`
 re-registers the sharing profiles' tools without them reloading. `auth: oauth`
 servers are never shared across profiles: each profile holds its own token under
-its own `mcp-tokens/` and opens its own connection. Terminal settings
+its own `mcp-tokens/` and opens its own connection. Trust policy stays per
+profile: a `trust: untrusted` profile sharing a `trust: full` profile's
+connection is still asked before every write-capable call, and
+`supports_parallel_tool_calls` applies only to the profile that set it. Terminal settings
 (`terminal.backend`, `terminal.cwd`, `terminal.docker_volumes`,
 `terminal.docker_shared_container_key`, SSH targets, …) are likewise resolved
 per profile on every routed turn: a profile that omits a terminal key gets the
