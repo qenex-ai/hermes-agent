@@ -51,6 +51,7 @@ git:
   api_requires_token: /api/v1/*
   github_org: https://github.com/qenex-ai
   this_repo: qenex-ai/hermes-agent
+  caddy_source_of_truth: git.qenex.ai/root/qenex-edge
 
 ipfs:
   pinata_api: https://api.pinata.cloud
@@ -58,16 +59,19 @@ ipfs:
   evidence: https://ipfs.qenex.ai
   dead_vhost: https://pinata.qenex.ai
   pin_add: qenex_ipfs_pin_add  # CID argument, dry_run default; not JSON
+  bake_pinata_vhost: 301 to https://qenex.ai/legal/evidence/  # never reverse_proxy api.pinata.cloud
 
 mail:
   canonical: mail.qenex.ai
   imap: { host: mail.qenex.ai, port: 993, tls: true }
   smtp: { host: mail.qenex.ai, port: 587, starttls: true }
   not: [email.qenex.ai, webmail.qenex.ai]
+  bake_aliases: 301 email.qenex.ai and webmail.qenex.ai → mail.qenex.ai
 
 registrar:
   public_rdap: https://rdap.qenex.ai
   operator_vhost_missing_sni: https://registrar.qenex.ai
+  bake: 301 registrar.qenex.ai and domains.qenex.ai → rdap.qenex.ai
 
 brain:
   base: https://brain.qenex.ai
@@ -77,6 +81,24 @@ brain:
     healthz: /healthz
   hermes_seat: hermes
   grok_seat: grok
+
+caddy_bake:
+  repo: git.qenex.ai/root/qenex-edge
+  pattern: append infra/caddy/Caddyfile.tmpl + generated Caddyfile (PRs #85 ultra, #86 claw, #87 hermes)
+  snippet: qenex-ai/cursor ops/london/missing-sni.caddy
+  apply: qenex-ai/cursor ops/london/apply-remaining-sni.sh
+  site_provisioner: create_site always mkdir /var/www/<domain> and fails ENOENT; do not use for remaining SNI
+  no_mkdir: all remaining names are 301 redir except rekor reverse_proxy 127.0.0.1:8294
+  live_do_not_duplicate: [claw.qenex.ai, hermes.qenex.ai]
+  remaining:
+    llm.qenex.ai: 301 → https://lab.qenex.ai{uri}
+    registrar.qenex.ai: 301 → https://rdap.qenex.ai{uri}
+    agents.qenex.ai: 301 → https://a2a.qenex.ai{uri}
+    pinata.qenex.ai: 301 → https://qenex.ai/legal/evidence/
+    email.qenex.ai: 301 → https://mail.qenex.ai{uri}
+    webmail.qenex.ai: 301 → https://mail.qenex.ai{uri}
+    domains.qenex.ai: 301 → https://rdap.qenex.ai{uri}
+    rekor.qenex.ai: reverse_proxy 127.0.0.1:8294
 
 missing_sni:
   - llm.qenex.ai
