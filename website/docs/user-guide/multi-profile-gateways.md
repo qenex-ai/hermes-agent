@@ -327,8 +327,11 @@ profile B receives B's value for such a name, or nothing if B has none, never th
 default profile's. MCP servers are connected **per profile**: two profiles that
 both name a server `github` with their own token get two connections and each
 sees only its own tools; profiles whose `mcp_servers` entry is identical (same
-route *and* credentials) share one connection, and an owner's `/reload-mcp`
-re-registers the sharing profiles' tools without them reloading. Terminal settings
+route *and* credentials, including mTLS `client_cert`/`client_key`) share one
+connection, and an owner's `/reload-mcp`
+re-registers the sharing profiles' tools without them reloading. `auth: oauth`
+servers are never shared across profiles: each profile holds its own token under
+its own `mcp-tokens/` and opens its own connection. Terminal settings
 (`terminal.backend`, `terminal.cwd`, `terminal.docker_volumes`,
 `terminal.docker_shared_container_key`, SSH targets, …) are likewise resolved
 per profile on every routed turn: a profile that omits a terminal key gets the
@@ -450,7 +453,10 @@ adapters are built the moment its `config.yaml`/`.env` carries a bot token
 default profile's `gateway_state.json` is updated, and `hermes -p <name> gateway
 status` reports it as served — no restart, and the other profiles' adapters and
 in-flight turns are untouched. Deleting a profile stops and unroutes its
-adapters the same way. The one-credential-one-poller rule still applies: a
+adapters the same way, and `hermes profile rename` unroutes the old name before
+the directory moves and hot-serves the new one (the old name is not resurrected
+by the adapters or the cron ticker that were still bound to it). The
+one-credential-one-poller rule still applies: a
 hot-added profile that reuses another profile's token is parked with a
 `duplicate_credential` error, never started as a second poller.
 
