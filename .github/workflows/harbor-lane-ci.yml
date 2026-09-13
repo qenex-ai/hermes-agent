@@ -1,0 +1,47 @@
+name: Harbor Lane CI
+
+on:
+  push:
+    paths:
+      - "business/harbor-lane/**"
+      - ".github/workflows/harbor-lane-ci.yml"
+  pull_request:
+    paths:
+      - "business/harbor-lane/**"
+      - ".github/workflows/harbor-lane-ci.yml"
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: business/harbor-lane/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: business/harbor-lane/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ndcbxdhskpcamuunmkmk.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-for-ci
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ndcbxdhskpcamuunmkmk.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-for-ci
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: business/harbor-lane/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run lint

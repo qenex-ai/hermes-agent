@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Harbor Lane",
+    "slug": "harbor-lane",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "harborlane",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#2d6d87"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.qenex.harborlane"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#2d6d87"
+      },
+      "package": "dev.qenex.harborlane"
+    },
+    "plugins": ["expo-router"]
+  }
+}
