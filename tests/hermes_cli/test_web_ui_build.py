@@ -145,8 +145,21 @@ class TestBuildWebUISkipsWhenFresh:
         assert result is True
         args, kwargs = mock_run.call_args
         assert "--workspace" not in args[0]
+        # --ignore-scripts is a security control, not incidental argv: npm
+        # lifecycle scripts execute arbitrary code from the whole transitive
+        # closure, and this install can run as root under `hermes update`.
+        # Asserted separately from the exact list so that a future argv change
+        # cannot drop it silently — the list assertion alone would just be
+        # "updated to match" by whoever removed it. main.py still defaults to
+        # ("--ignore-scripts",) after this merge (see _run_npm_install_deterministic).
+        assert "--ignore-scripts" in args[0]
+        # Binary NAME rather than a hardcoded /usr/bin/npm: taken from upstream,
+        # which made this portable for npm.cmd on Windows. Our previous exact-path
+        # assertion would have failed there.
         assert Path(args[0][0]).name in {"npm", "npm.cmd"}
-        assert args[0][1:] == ["ci", "--include=dev", "--silent", "--prefer-offline"]
+        assert args[0][1:] == [
+            "ci", "--include=dev", "--ignore-scripts", "--silent", "--prefer-offline",
+        ]
         assert kwargs["cwd"] == web_dir
         assert "ESBUILD_BINARY_PATH" not in kwargs["env"]
         assert "ESBUILD_BINARY_PATH" not in mock_build.call_args.kwargs["env"]

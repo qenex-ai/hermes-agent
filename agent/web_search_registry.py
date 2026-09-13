@@ -112,8 +112,14 @@ def _resolve(configured: Optional[str], *, capability: str) -> Optional[WebSearc
             )
 
     # Fallbacks are availability-filtered so a registered-but-keyless provider
-    # never becomes "active" on a fresh install.
-    eligible = [p for p in snapshot.values() if _capable(p) and _available(p)]
+    # never becomes "active" on a fresh install. Metered backends also need an
+    # explicit web.backend pick — key presence is not consent.
+    from hermes_cli.billing_wallet import allow_metered_autoselect
+
+    eligible = [
+        p for p in snapshot.values()
+        if _capable(p) and _available(p) and allow_metered_autoselect(p.name)
+    ]
     if len(eligible) == 1:
         return eligible[0]
 

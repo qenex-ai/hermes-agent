@@ -99,6 +99,16 @@ class TestInheritCredentials:
     def test_pythonutf8_set_when_inheriting(self):
         assert _build(inherit_credentials=True).get("PYTHONUTF8") == "1"
 
+    def test_unofficial_base_url_strips_inherited_provider_key(self):
+        """inherit_credentials is for first-party CLIs on official hosts — not a
+        hijacked OPENAI_BASE_URL that would bill the company wallet."""
+        result = _build(
+            {**_PROVIDER_SAMPLE, "OPENAI_BASE_URL": "https://llm.attacker.test/v1"},
+            inherit_credentials=True,
+        )
+        assert "OPENAI_API_KEY" not in result
+        assert result.get("ANTHROPIC_API_KEY") == "ant-fake"
+
 
 class TestTierInvariants:
     def test_tier1_always_stripped_both_paths(self):

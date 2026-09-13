@@ -117,6 +117,16 @@ def _on_disk_llm_api_key(config: dict[str, Any]) -> str:
     return ""
 
 
+_HINDSIGHT_LLM_VENDORS = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "gemini",
+    "groq": "groq",
+    "openrouter": "openrouter",
+    "minimax": "minimax",
+}
+
+
 def _embedded_llm_api_key(config: dict[str, Any]) -> str:
     """Resolve the LLM API key: explicit config first, then the profile secret
     scope, then the on-disk profile env as a last resort.
@@ -162,14 +172,15 @@ def _may_rewrite_profile_env(config: dict[str, Any]) -> bool:
 
 def _build_embedded_profile_env(config: dict[str, Any], *, llm_api_key: str | None = None) -> dict[str, str]:
     """Build the profile-scoped env that standalone hindsight-embed consumes."""
-    if llm_api_key is None:
-        llm_api_key = _embedded_llm_api_key(config)
-    env_values = {
-        "HINDSIGHT_API_LLM_PROVIDER": str(_daemon_llm_provider(config.get("llm_provider", ""))),
-        "HINDSIGHT_API_LLM_API_KEY": str(llm_api_key or ""),
-        "HINDSIGHT_API_LLM_MODEL": str(config.get("llm_model", "")),
-        "HINDSIGHT_API_LOG_LEVEL": "info",
-    }
+    explicit = ""
+    company = ""
+    if llm_api_key is not None:
+        explicit = str(llm_api_key or "")
+    else:
+        explicit = str(config.get("llmApiKey") or config.get("llm_api_key") or "").strip()
+        if not explicit:
+            # Scoped secret + on-disk fallback (scopeless multiplex worker), never raw os.environ.
+            company = _embedded_llm_api_key(config)
     # Base URL is per-profile like the key beside it (the scoped key must not go to the default's host);
     # on the scopeless daemon worker a miss is a miss, never os.environ (same rule as the key above).
     base_url = config.get("llm_base_url")
@@ -178,6 +189,18 @@ def _build_embedded_profile_env(config: dict[str, Any], *, llm_api_key: str | No
             base_url = get_secret("HINDSIGHT_API_LLM_BASE_URL", "") or ""
         except UnscopedSecretError:
             base_url = ""
+    provider = _daemon_llm_provider(config.get("llm_provider", ""))
+    vendor = _HINDSIGHT_LLM_VENDORS.get(provider, "openai")
+    from hermes_cli.billing_wallet import bound_vendor_secret
+    llm_api_key = bound_vendor_secret(
+        vendor=vendor, company_secret=company, explicit_secret=explicit, target_url=str(base_url or ""),
+    )
+    env_values = {
+        "HINDSIGHT_API_LLM_PROVIDER": str(provider),
+        "HINDSIGHT_API_LLM_API_KEY": str(llm_api_key or ""),
+        "HINDSIGHT_API_LLM_MODEL": str(config.get("llm_model", "")),
+        "HINDSIGHT_API_LOG_LEVEL": "info",
+    }
     if base_url:
         env_values["HINDSIGHT_API_LLM_BASE_URL"] = str(base_url)
     if (idle_timeout := config.get("idle_timeout")) is None:

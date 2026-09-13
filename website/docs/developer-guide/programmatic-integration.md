@@ -10,7 +10,7 @@ Hermes ships three protocols for driving the agent from external programs — ID
 
 | Protocol | Transport | Best for | Defined by |
 |----------|-----------|----------|------------|
-| **ACP** | JSON-RPC over stdio | IDE clients (VS Code, Zed, JetBrains) that already speak the [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol) | `acp_adapter/` |
+| **ACP** | JSON-RPC over stdio | IDE clients (VS Code, Zed, JetBrains) that already speak the [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol). Not Cursor — Cursor uses [Hermes MCP](/guides/cursor-mcp). | `acp_adapter/` |
 | **TUI gateway** | JSON-RPC over stdio (or WebSocket) | Custom hosts that want fine-grained control of sessions, slash commands, approvals, and streaming events | `tui_gateway/server.py` |
 | **API server** | HTTP + Server-Sent Events | OpenAI-compatible frontends (Open WebUI, LobeChat, LibreChat…) and language-agnostic web clients | `gateway/platforms/api_server.py` |
 
@@ -20,7 +20,7 @@ All three drive the same `AIAgent` core. They differ only in wire format and whi
 
 ## ACP (Agent Client Protocol)
 
-`hermes acp` starts a stdio JSON-RPC server speaking ACP. Used in production by VS Code (Zed Industries' ACP extension), Zed, and any JetBrains IDE with an ACP plugin.
+`hermes acp` starts a stdio JSON-RPC server speaking ACP. Used in production by VS Code (Zed Industries' ACP extension), Zed, and any JetBrains IDE with an ACP plugin. Cursor is **not** an ACP host for Hermes — it consumes `hermes mcp serve` as MCP tools; see [Use Hermes MCP in Cursor IDE](/guides/cursor-mcp). Cursor’s `agent acp` CLI is Cursor-as-ACP-server (the opposite direction).
 
 Capabilities exposed: session creation, prompt submission, streaming agent message chunks, tool-call events, permission requests, session fork, cancel, and authentication. Tool output is rendered into ACP `Diff`/`ToolCall` content blocks the IDE understands.
 

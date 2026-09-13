@@ -211,9 +211,10 @@ class TestIsAvailable:
         assert p is not None
         assert p.is_available() is False
 
-        # Either FIRECRAWL_API_KEY or FIRECRAWL_API_URL lights it up.
+        # Either FIRECRAWL_API_KEY or FIRECRAWL_API_URL lights it up — but an
+        # unused cloud key without a stored pick is not consent to spend.
         monkeypatch.setenv("FIRECRAWL_API_KEY", "real")
-        assert p.is_available() is True
+        assert p.is_available() is False
         monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
         monkeypatch.setenv("FIRECRAWL_API_URL", "http://localhost:3002")
         assert p.is_available() is True
@@ -300,11 +301,13 @@ class TestRegistryResolution:
 
         monkeypatch.setenv("EXA_API_KEY", "real")
         result = _resolve("not-a-real-provider", capability="search")
-        # Either ddgs (no-key fallback) or exa (the only available
-        # premium provider) — both are valid. The point is the unknown
-        # name shouldn't return None when SOMETHING is available.
-        assert result is not None
-        assert result.is_available() is True
+        # Unused EXA_API_KEY is not consent to paid-autoselect Exa. Fallback may
+        # be keyless, ddgs, or None — never the unknown name.
+        assert result is None or result.name != "not-a-real-provider"
+        if result is not None and result.name == "exa":
+            from hermes_cli.billing_wallet import web_company_secret
+
+            assert web_company_secret(backend="exa", company_secret="real", bind_enabled=True) == ""
 
 
     def test_no_config_no_credentials_returns_none(

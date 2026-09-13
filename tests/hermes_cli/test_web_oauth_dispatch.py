@@ -777,5 +777,85 @@ def test_status_falls_through_to_generic_dispatcher_for_catalog_only_provider():
     assert out["has_refresh_token"] is True
 
 
+def test_httpx_call_retries_once_on_eafnosupport(monkeypatch):
+    """xAI device-code start must retry over IPv4 after errno 97, not 500 raw."""
+    import errno
+
+    attempts = {"n": 0}
+
+    class _OnceEafnosupportClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                inner = OSError(errno.EAFNOSUPPORT, "Address family not supported by protocol")
+                req = httpx.Request("POST", "https://auth.x.ai/oauth2/device/code")
+                err = httpx.ConnectError("All connection attempts failed", request=req)
+                err.__cause__ = inner
+                raise err
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    import socket
+
+    monkeypatch.setattr(httpx, "Client", _OnceEafnosupportClient)
+    original_gai = socket.getaddrinfo
+    try:
+        result = asyncio.run(_rt_oauth._httpx_call(lambda client: "device-ok"))
+    finally:
+        socket.getaddrinfo = original_gai
+    assert result == "device-ok"
+    assert attempts["n"] == 2
+
+
+def test_xai_oauth_start_eafnosupport_message(monkeypatch):
+    """Retry exhaustion must not surface the raw '[Errno 97]' blob in the modal."""
+    import errno
+
+    async def _always_eafnosupport(*args, **kwargs):
+        inner = OSError(errno.EAFNOSUPPORT, "Address family not supported by protocol")
+        raise inner
+
+    monkeypatch.setattr(_rt_oauth, "_httpx_call", _always_eafnosupport)
+    resp = client.post("/api/providers/oauth/xai-oauth/start", headers=HEADERS)
+    assert resp.status_code == 500, resp.text
+    detail = resp.json()["detail"]
+    assert "IPv6" in detail
+    assert "force_ipv4" in detail
+    assert "[Errno 97]" not in detail
+
+
+def test_httpx_call_installs_happy_eyeballs_backend(monkeypatch):
+    """Dashboard OAuth start must race families; IPv4-only retry is not enough on dual-stack hosts."""
+    for name in (
+        "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
+        "https_proxy", "http_proxy", "all_proxy",
+        "NO_PROXY", "no_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    from agent import process_bootstrap
+
+    seen = {"backends": []}
+
+    def _capture(client):
+        transports = [client._transport, *client._mounts.values()]
+        seen["backends"] = [
+            transport._pool._network_backend
+            for transport in transports
+            if transport is not None and hasattr(transport, "_pool")
+        ]
+        return "ok"
+
+    result = asyncio.run(_rt_oauth._httpx_call(_capture))
+    assert result == "ok"
+    assert any(
+        isinstance(backend, process_bootstrap._HappyEyeballsSyncBackend)
+        for backend in seen["backends"]
+    )
 
 

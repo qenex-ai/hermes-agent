@@ -1,0 +1,47 @@
+# Nous-approved MCP catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: sourcegraph
+description: 'Code search and navigation: semantic search, keywords, definitions, and diffs.'
+source: https://sourcegraph.com/docs/api/mcp
+
+# Official vendor-hosted remote MCP (URL-only — Hermes never spawns a local
+# process for this entry). Native OAuth 2.1 + Dynamic Client Registration
+# (verified live 2026-09-11: RFC 9728 protected-resource metadata at
+# https://sourcegraph.com/.well-known/oauth-protected-resource/.api/mcp with
+# resource=https://sourcegraph.com/.api/mcp -> AS https://sourcegraph.com
+# with registration_endpoint https://sourcegraph.com/.auth/idp/oauth/register,
+# scope mcp). Hermes's MCP client + mcp_oauth_manager handle discovery, PKCE,
+# token exchange, and refresh.
+#
+# Path note: POST https://sourcegraph.com/.api/mcp is the Streamable HTTP
+# endpoint (401 + Bearer until authed). Origin returns HTML; /sse is 404.
+
+transport:
+  type: http
+  url: https://sourcegraph.com/.api/mcp
+
+auth:
+  type: oauth
+
+# Composer-suggestion triggers (desktop brand pills).
+suggest:
+  keywords:
+    - sourcegraph
+    - code search
+  hosts:
+    - sourcegraph.com
+
+post_install: |
+  On first connection Hermes opens a browser to authorize with
+  Sourcegraph (or run `hermes mcp login sourcegraph`). Approve access
+  for your Sourcegraph user, then restart the session so tools load.
+
+  Cursor IDE: Settings → Tools & MCP, enable `sourcegraph`, complete
+  the OAuth prompt. Token auth is optional: set SOURCEGRAPH_ACCESS_TOKEN
+  and add Authorization: token ${env:SOURCEGRAPH_ACCESS_TOKEN}. Do not
+  put tokens in the project mcp.json.
+
+  Self-hosted Sourcegraph: point mcp_servers.sourcegraph.url at
+  https://<your-instance>/.api/mcp.

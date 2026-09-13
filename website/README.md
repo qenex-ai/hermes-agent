@@ -26,19 +26,17 @@ This command generates static content into the `build` directory and can be serv
 
 ## Deployment
 
-Using SSH:
+NousResearch production docs still ship through GitHub Pages
+(`.github/workflows/deploy-site.yml`). Vercel previews and CLI production
+deploys use `.github/workflows/deploy-vercel.yml`: GitHub Actions runs the
+Python skill-doc generators, `vercel build`, then `vercel deploy --prebuilt`.
 
-```bash
-USE_SSH=true yarn deploy
-```
+Required repository secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
+Point the Vercel project's Root Directory at `website`. Disable Vercel git
+auto-deploy so a remote rebuild cannot skip the generators.
 
-Not using SSH:
-
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+- Pull requests against `website/**` / `skills/**` → preview URL (commented on the PR)
+- `main`, a published release, or `workflow_dispatch` → production
 
 ## Diagram Linting
 

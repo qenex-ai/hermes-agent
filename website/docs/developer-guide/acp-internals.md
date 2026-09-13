@@ -172,6 +172,7 @@ ACP temporarily installs an approval callback on the terminal tool during prompt
 - ACP sessions are persisted to the shared `~/.hermes/state.db` (SessionDB) and transparently restored across process restarts; they appear in `session_search`
 - non-text prompt blocks are currently ignored for request text extraction
 - editor-specific UX varies by ACP client implementation
+- Cursor IDE is not an ACP host for Hermes; it uses `hermes mcp serve` — see [Use Hermes MCP in Cursor IDE](/guides/cursor-mcp)
 
 ## Related files
 

@@ -71,6 +71,23 @@ class TestClassifyFetchFailure:
         msg = update_cmd._classify_fetch_failure("fatal: something novel")
         assert msg == "✗ Failed to fetch updates from origin."
 
+    def test_missing_origin_remote_is_not_generic_fetch_failure(self):
+        # Production (Sep 2026): `git fetch origin` after origin was deleted,
+        # leaving only `upstream` — git's wording used to fall through to the
+        # generic "Failed to fetch updates from origin." with no recovery hint.
+        msg = update_cmd._classify_fetch_failure(
+            "fatal: 'origin' does not appear to be a git repository\n"
+            "fatal: Could not read from remote repository."
+        )
+        assert "No git remote named 'origin'" in msg
+        assert "Failed to fetch updates from origin." not in msg
+
+    def test_missing_upstream_is_not_classified_as_missing_origin(self):
+        msg = update_cmd._classify_fetch_failure(
+            "fatal: 'upstream' does not appear to be a git repository"
+        )
+        assert msg == "✗ Failed to fetch updates from origin."
+
 
 class TestPrintFetchFailure:
     def test_prints_diagnosis_and_first_raw_line(self, capsys):
@@ -85,6 +102,15 @@ class TestPrintFetchFailure:
         update_cmd._print_fetch_failure("")
         out = capsys.readouterr().out.strip().splitlines()
         assert out == ["✗ Failed to fetch updates from origin."]
+
+    def test_missing_origin_prints_add_origin_hint(self, capsys):
+        update_cmd._print_fetch_failure(
+            "fatal: 'origin' does not appear to be a git repository"
+        )
+        out = capsys.readouterr().out
+        assert "No git remote named 'origin'" in out
+        assert "git remote add origin <url>" in out
+        assert "hermes update" in out
 
 
 def test_update_network_git_calls_never_prompt_for_credentials():

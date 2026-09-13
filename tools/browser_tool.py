@@ -42,7 +42,8 @@ def _build_browser_env() -> dict:
 
     env = hermes_subprocess_env(inherit_credentials=False)
     env.update({k: os.environ[k] for k in _BROWSER_PASSTHROUGH_KEYS if k in os.environ})
-    return env
+    from hermes_cli.billing_wallet import bind_child_env
+    return bind_child_env(env)
 
 
 try:
