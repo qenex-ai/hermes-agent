@@ -185,6 +185,85 @@ Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync 
 into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
 script; per-boot services belong in the environment `start` command or `terminals`.
 
+Local bootstrap matching CI (`tests.yml` / `lint.yml`):
+
+```bash
+uv sync --locked --python 3.11 \
+  --extra all --extra dev \
+  --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
+source .venv/bin/activate
+```
+
+Python **3.11–3.13** only (`requires-python = ">=3.11,<3.14"` in `pyproject.toml`). After
+changing dependencies: `uv lock` and commit `uv.lock`. Prefer `uv sync --locked` (or
+`--frozen` in cloud bootstrap) over ad-hoc `uv pip install`.
+
+**Shallow clones:** `git rev-parse --is-shallow-repository` before measuring divergence or
+merge-base against upstream — a one-commit shallow clone reports bogus "unrelated histories"
+and inflated "commits behind" counts (see `.github/workflows/sync-upstream.yml`).
+
+## Build, Test, and Lint
+
+Commands below are taken from manifests and CI workflows — do not guess alternatives.
+
+### Python tests
+
+**Always** `scripts/run_tests.sh` (never bare `pytest`). See [Testing](#testing-applies-everywhere).
+
+```bash
+scripts/run_tests.sh                              # full suite (CI default)
+scripts/run_tests.sh tests/agent/test_foo.py      # one file
+scripts/run_tests.sh tests/gateway/ -k pattern    # directory + filter
+scripts/run_tests.sh -j 4                         # cap parallel file workers
+```
+
+### Python lint and static checks
+
+| Check | Command | CI job |
+|---|---|---|
+| Ruff (blocking) | `ruff check .` | `lint.yml` → `ruff-blocking` |
+| Types (advisory PR diff) | `ty check` | `lint.yml` → `lint-diff` |
+| Windows footguns | `python scripts/check-windows-footguns.py --all` | `lint.yml` → `windows-footguns` |
+| In-tree compat pointers | `python scripts/check_compat_pointers.py` | `lint.yml` → `windows-footguns` |
+
+Ruff rules live in `[tool.ruff.lint]` in `pyproject.toml` — currently `PLW1514`
+(`encoding=` on text I/O) and `ASYNC210/220/221/251` (blocking calls inside `async def` on
+the gateway event loop).
+
+### JavaScript / TypeScript
+
+Root is an npm workspace (`package.json` → `workspaces`). CI runs every package `check:*`
+script in parallel via `node .github/scripts/run-workspace-checks.mjs` (`js-tests.yml`).
+
+```bash
+npm ci                                            # install (CI)
+npm run check                                     # all workspaces, serial (local quick pass)
+node .github/scripts/run-workspace-checks.mjs     # CI-parity parallel checks
+npm run --workspace web check                     # dashboard: tsc + vitest + eslint
+npm run --workspace ui-tui check                  # TUI: build:ink + tsc + vitest + eslint
+npm run --workspace apps/desktop check            # desktop lint + vitest suites
+npm run --workspace web build                     # dashboard → hermes_cli/web_dist
+```
+
+Node: `.nvmrc` + root `engines` (CI uses Node 26). Run `npm ci` from repo root, not inside
+a single workspace.
+
+### Docs site (`website/`)
+
+```bash
+cd website && npm ci && npm run typecheck && npm run lint:diagrams
+```
+
+### Pre-PR smoke by change type
+
+| Changed | Run |
+|---|---|
+| Python only | `scripts/run_tests.sh` on touched dirs + `ruff check .` |
+| JS/TS only | `node .github/scripts/run-workspace-checks.mjs` (or affected workspace `npm run check`) |
+| `pyproject.toml` / `uv.lock` | `uv lock` consistency + full `scripts/run_tests.sh` |
+| Both stacks | Python row + JS row |
+
 ## Project Structure
 
 Counts shift constantly; the filesystem is canonical. Load-bearing entry points:
