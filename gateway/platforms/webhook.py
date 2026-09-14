@@ -128,6 +128,10 @@ _BUILTIN_DELIVER_PLATFORMS = {
 #     ``platforms.webhook.extra.host``.
 DEFAULT_HOST = None
 DEFAULT_PORT = 8644
+# Pinata hosted-agent port-forwards POST to bare ``/webhooks`` with no
+# route segment. ``hermes webhook subscribe main`` is the QENEX default
+# subscription name; alias the bare path to this route (HMAC unchanged).
+DEFAULT_ROUTE_NAME = "main"
 _INSECURE_NO_AUTH = "INSECURE_NO_AUTH"
 _DYNAMIC_ROUTES_FILENAME = "webhook_subscriptions.json"
 _RATE_WINDOW_SECONDS = 60.0
@@ -287,16 +291,7 @@ class WebhookAdapter(BasePlatformAdapter):
         # including Transfer-Encoding: chunked bodies that carry no
         # Content-Length and would otherwise bypass the header check below.
         app = web.Application(client_max_size=self._max_body_bytes)
-        app.router.add_get("/health", self._handle_health)
-        app.router.add_post("/webhooks/{route_name}", self._handle_webhook)
-        # Multi-profile multiplexing: a /p/<profile>/webhooks/<route> prefix
-        # routes the inbound event to that profile. Same handler; the profile is
-        # captured from the path and stamped onto the SessionSource so the agent
-        # turn resolves that profile's config/skills/credentials. Only honored
-        # when gateway.multiplex_profiles is on (the handler validates).
-        app.router.add_post(
-            "/p/{profile}/webhooks/{route_name}", self._handle_webhook
-        )
+        self.register_http_routes(app)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -342,6 +337,52 @@ class WebhookAdapter(BasePlatformAdapter):
             route_names,
         )
         return True
+
+    def register_http_routes(self, app: "web.Application") -> None:
+        """Register health + webhook POST routes, including the bare-path alias.
+
+        Pinata (and other hosted-agent port-forwards) reverse-proxy to
+        ``POST /webhooks`` with no ``{route_name}``. Hermes historically
+        registered only ``/webhooks/{route_name}``, so those forwards 404'd
+        while ``/webhooks/main`` (the subscribe-script default) returned 401
+        on unsigned probes — proving the route existed. Alias the bare path
+        to the default route; HMAC validation is unchanged.
+        """
+        app.router.add_get("/health", self._handle_health)
+        app.router.add_post("/webhooks", self._handle_webhook)
+        app.router.add_post("/webhooks/", self._handle_webhook)
+        app.router.add_post("/webhooks/{route_name}", self._handle_webhook)
+        # Multi-profile multiplexing: a /p/<profile>/webhooks/<route> prefix
+        # routes the inbound event to that profile. Same handler; the profile is
+        # captured from the path and stamped onto the SessionSource so the agent
+        # turn resolves that profile's config/skills/credentials. Only honored
+        # when gateway.multiplex_profiles is on (the handler validates).
+        app.router.add_post("/p/{profile}/webhooks", self._handle_webhook)
+        app.router.add_post("/p/{profile}/webhooks/", self._handle_webhook)
+        app.router.add_post(
+            "/p/{profile}/webhooks/{route_name}", self._handle_webhook
+        )
+
+    def _resolved_route_name(self, request: "web.Request") -> str:
+        """Return the webhook route name for this request.
+
+        Named ``/webhooks/{route_name}`` wins. Bare ``/webhooks`` uses
+        ``platforms.webhook.extra.default_route`` if set, else ``main`` when
+        that subscription exists, else the sole configured route, else
+        ``main`` (which 404s if missing — same as an unknown named route).
+        """
+        named = str(request.match_info.get("route_name") or "").strip()
+        if named:
+            return named
+        extra = self.config.extra or {}
+        configured = extra.get("default_route")
+        if isinstance(configured, str) and configured.strip():
+            return configured.strip()
+        if DEFAULT_ROUTE_NAME in self._routes:
+            return DEFAULT_ROUTE_NAME
+        if len(self._routes) == 1:
+            return next(iter(self._routes))
+        return DEFAULT_ROUTE_NAME
 
     async def disconnect(self) -> None:
         if self._runner:
@@ -620,11 +661,15 @@ class WebhookAdapter(BasePlatformAdapter):
         return configured_profile == effective_profile
 
     async def _handle_webhook(self, request: "web.Request") -> "web.Response":
-        """POST /webhooks/{route_name} — receive and process a webhook event."""
+        """POST /webhooks/{route_name} — receive and process a webhook event.
+
+        Bare ``POST /webhooks`` (no route segment) aliases to the default
+        route — see ``_resolved_route_name``. HMAC is still required.
+        """
         # Hot-reload dynamic subscriptions on each request (mtime-gated, cheap)
         self._reload_dynamic_routes()
 
-        route_name = request.match_info.get("route_name", "")
+        route_name = self._resolved_route_name(request)
         route_config = self._routes.get(route_name)
 
         # Multi-profile: resolve + validate the /p/<profile>/ prefix if present.
