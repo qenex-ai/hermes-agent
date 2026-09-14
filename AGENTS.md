@@ -185,6 +185,48 @@ Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync 
 into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
 script; per-boot services belong in the environment `start` command or `terminals`.
 
+Python lint/type (with venv active): `ruff check .`, `ty check`.
+
+## Build & test
+
+### Python
+
+See **Testing** below — always `scripts/run_tests.sh`, never bare `pytest`.
+
+### JavaScript
+
+Install once from repo root (`npm install` — workspaces: `apps/*`, `ui-tui`, `web`,
+`tests-js`):
+
+```bash
+npm run check                         # all JS workspaces
+npm run check --workspace ui-tui      # TUI
+npm run check --workspace web         # dashboard SPA
+npm run check --workspace apps/desktop
+npm run check --workspace tests-js    # repo-level JS tests (scripts, packaging)
+```
+
+TUI (`ui-tui/`):
+
+```bash
+npm run dev        # watch: rebuild hermes-ink + tsx --watch src/entry.tsx
+npm run build      # production build (hermes-ink + tsc)
+npm run typecheck  # tsc --noEmit
+npm run lint       # eslint
+npm run test       # vitest run
+npm run check      # build:ink + typecheck + test + lint
+```
+
+Desktop (`apps/desktop/` — from root: `npm run install:desktop`):
+
+```bash
+npm run dev     # Vite renderer + Electron
+npm run check   # typecheck + lint + vitest (ui, electron, desktop:all)
+npm test        # vitest run
+```
+
+Dashboard web (`web/`): `npm run dev`, `npm run build`, `npm run check`.
+
 ## Project Structure
 
 Counts shift constantly; the filesystem is canonical. Load-bearing entry points:
@@ -298,11 +340,13 @@ Table-driven beats condition ladders for ids/routes/views. `src/app` owns routes
 
 ## Dependency Pinning Policy
 
-All dependencies carry upper bounds (litellm compromise #2796/#2810; Mini Shai-Hulud worm,
-May 2026). PyPI: `>=floor,<next_major` (`"httpx>=0.28.1,<1"`); pre-1.0: `<0.(minor+2)`
-(`>=0.29,<0.32`). Git URLs: 40-char commit SHA. GitHub Actions: SHA + `# vN` comment. CI-only
-pip: `==exact`. A bare `>=X.Y.Z` is rejected by CI and reviewers. Run `uv lock` after
-changing `pyproject.toml`. Reference: #2810 (bounds), #9801 (SHA pinning + audit CI).
+Supply-chain hardening after litellm (#2796/#2810) and Mini Shai-Hulud (May 2026). Core
+`[project] dependencies` in `pyproject.toml` use exact `==` pins (see that file's header);
+optional extras use `>=floor,<next_major` (`"httpx>=0.28.1,<1"`); pre-1.0 extras:
+`<0.(minor+2)` (`>=0.29,<0.32`). Git URLs: 40-char commit SHA. GitHub Actions: SHA + `# vN`
+comment. CI-only pip: `==exact`. A bare unbounded `>=X.Y.Z` is rejected by reviewers. Run
+`uv lock` after changing `pyproject.toml`. Reference: #2810 (bounds), #9801 (SHA pinning +
+audit CI); full table in `CONTRIBUTING.md`.
 
 ## Commits, Merges, PRs
 
@@ -413,6 +457,26 @@ export function hiddenWindowsChildOptions(options = {}, isWindows = process.plat
 ```
 If the logic lives inline in a god-file and extraction feels disruptive, that is the signal to
 extract, not to regex around it.
+
+## Known pitfalls
+
+- **Interactive menus:** all CLI menu-pickers use curses (`hermes_cli/curses_ui.py`; see
+  `hermes_cli/tools_config.py`).
+- **Spinner ANSI:** never emit `\033[K` (erase-to-EOL) in spinner/display code — it leaks as
+  literal `?[K` under prompt_toolkit's `patch_stdout`; space-pad instead.
+- **`_last_resolved_tool_names`:** process-global in `model_tools.py`; `delegate_tool.py`
+  saves/restores it around subagent runs — do not assume it is stable mid-delegation.
+- **Cross-tool schema refs:** tool descriptions must not name tools from other toolsets
+  statically (they may be disabled); add dynamic post-processing in `get_tool_definitions()`
+  (`model_tools.py`) when a cross-reference is required.
+- **Gateway message guards:** two sequential guards (adapter + runner) — approval/control
+  commands must bypass both; details in `gateway/AGENTS.md`.
+- **Plugin discovery:** `discover_plugins()` runs as a side effect of importing
+  `model_tools.py`; code paths that read plugin state without that import must call it
+  explicitly (idempotent).
+
+Detailed architecture for CLI slash commands, TUI/desktop, tools, plugins, skills, cron,
+kanban, and config now lives in the area `AGENTS.md` files below — not duplicated here.
 
 ## Routing Table — working in X → read X/AGENTS.md
 
