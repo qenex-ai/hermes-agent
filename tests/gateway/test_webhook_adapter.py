@@ -72,8 +72,7 @@ def _create_app(adapter: WebhookAdapter) -> web.Application:
     """Build the aiohttp Application from the adapter (without starting a full server)."""
     # Mirror connect(): client_max_size enforces the cap on chunked bodies.
     app = web.Application(client_max_size=adapter._max_body_bytes)
-    app.router.add_get("/health", adapter._handle_health)
-    app.router.add_post("/webhooks/{route_name}", adapter._handle_webhook)
+    adapter.register_http_routes(app)
     return app
 
 
@@ -524,6 +523,88 @@ class TestHTTPHandling:
         async with TestClient(TestServer(app)) as cli:
             resp = await cli.post("/webhooks/nonexistent", json={"a": 1})
             assert resp.status == 404
+
+    @pytest.mark.asyncio
+    async def test_bare_webhooks_aliases_to_main(self):
+        """Pinata forwards POST /webhooks with no route segment; alias to main."""
+        routes = {"main": {"secret": _INSECURE_NO_AUTH, "prompt": "hello {x}"}}
+        adapter = _make_adapter(routes=routes)
+        adapter.handle_message = AsyncMock()
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post("/webhooks", json={"x": 1})
+            assert resp.status == 202
+            assert (await resp.json())["route"] == "main"
+            trailing = await cli.post("/webhooks/", json={"x": 1})
+            assert trailing.status == 202
+            assert (await trailing.json())["route"] == "main"
+
+    @pytest.mark.asyncio
+    async def test_bare_webhooks_still_requires_hmac(self):
+        """The Pinata alias must not skip HMAC validation."""
+        secret = "pinata-route-secret"
+        routes = {"main": {"secret": secret, "prompt": "hello"}}
+        adapter = _make_adapter(routes=routes)
+        adapter.handle_message = AsyncMock()
+        app = _create_app(adapter)
+        body = b'{"probe":true}'
+        async with TestClient(TestServer(app)) as cli:
+            unsigned = await cli.post(
+                "/webhooks", data=body, headers={"Content-Type": "application/json"}
+            )
+            assert unsigned.status == 401
+            signed = await cli.post(
+                "/webhooks",
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Signature": _generic_signature(body, secret),
+                },
+            )
+            assert signed.status == 202
+            assert (await signed.json())["route"] == "main"
+        await asyncio.sleep(0)
+        adapter.handle_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_bare_webhooks_uses_configured_default_route(self):
+        routes = {
+            "main": {"secret": _INSECURE_NO_AUTH, "prompt": "main"},
+            "inbox": {"secret": _INSECURE_NO_AUTH, "prompt": "inbox"},
+        }
+        adapter = _make_adapter(routes=routes)
+        adapter.config.extra["default_route"] = "inbox"
+        adapter.handle_message = AsyncMock()
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post("/webhooks", json={"a": 1})
+            assert resp.status == 202
+            assert (await resp.json())["route"] == "inbox"
+
+    @pytest.mark.asyncio
+    async def test_bare_webhooks_falls_back_to_sole_route(self):
+        routes = {"solo": {"secret": _INSECURE_NO_AUTH, "prompt": "x"}}
+        adapter = _make_adapter(routes=routes)
+        adapter.handle_message = AsyncMock()
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post("/webhooks", json={"a": 1})
+            assert resp.status == 202
+            assert (await resp.json())["route"] == "solo"
+
+    @pytest.mark.asyncio
+    async def test_bare_webhooks_404_when_default_missing_among_many(self):
+        routes = {
+            "alpha": {"secret": _INSECURE_NO_AUTH, "prompt": "a"},
+            "beta": {"secret": _INSECURE_NO_AUTH, "prompt": "b"},
+        }
+        adapter = _make_adapter(routes=routes)
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post("/webhooks", json={"a": 1})
+            assert resp.status == 404
+            data = await resp.json()
+            assert data["error"] == "Unknown route: main"
 
 
     @pytest.mark.asyncio
@@ -983,12 +1064,7 @@ class TestMultiplexProfileWebhookAuthentication:
 
     @staticmethod
     def _app(adapter):
-        app = _create_app(adapter)
-        app.router.add_post(
-            "/p/{profile}/webhooks/{route_name}",
-            adapter._handle_webhook,
-        )
-        return app
+        return _create_app(adapter)
 
     @staticmethod
     def _headers(body: bytes, secret: str):
