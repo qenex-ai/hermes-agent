@@ -3,6 +3,14 @@
 Applies on top of the root `AGENTS.md`. Long-form: `website/docs/developer-guide/creating-skills.md`;
 user docs: `website/docs/user-guide/features/skills.md`, `curator.md`.
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/skills/
+scripts/run_tests.sh tests/skills/test_authoring_standards.py
+hermes skills list
+```
+
 ## Two surfaces
 
 - **`skills/`** — built-in, loadable by default, organised by category (`skills/github/`, `skills/mlops/`).

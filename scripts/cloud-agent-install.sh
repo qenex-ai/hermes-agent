@@ -17,6 +17,8 @@
 # Recurring environment builds fail with exit 127 when the file is missing.
 # Non-interactive; does not start servers.
 # Safe to run repeatedly: every step is a no-op refresh when already satisfied.
+# Optional UI after install: `hermes dashboard` (see docs/cloud-agent-and-checkout.md).
+# Cursor environment "start" command is the right place for a long-running dashboard server.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -4,6 +4,15 @@ Applies on top of the root `AGENTS.md`. The TUI fully replaces the classic promp
 activate with `hermes --tui` or `HERMES_TUI=1`. `tui_gateway` is ALSO the backend the Desktop app
 and the dashboard `/chat` talk to — changes here have three consumers.
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/tui_gateway/
+python scripts/gen_gateway_contracts.py   # after contract model changes
+cd ui-tui && npm run check              # Ink UI + types
+hermes --tui                              # manual smoke (stdio JSON-RPC)
+```
+
 ## Process model
 
 ```

@@ -9,6 +9,16 @@ apply), [`DESIGN.md`](./DESIGN.md) for the visual and interaction contract, and
 When a rule here and the code disagree, trust the code and fix whichever is
 wrong — but never break an invariant to make a change easier.
 
+## Commands
+
+```bash
+npm ci && npm run check --workspace apps/desktop   # from repo root
+cd apps/desktop && npm run dev                     # Electron + Vite (see onboarding env below)
+scripts/run_tests.sh tests/scripts/desktop_update/ # when touching updater paths
+```
+
+Guest onboarding rehearsal env vars: see **Rehearsing the guided onboarding** below.
+
 ## What this app is
 
 Desktop is its own native chat surface. It is not the browser dashboard and it

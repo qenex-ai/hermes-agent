@@ -2,6 +2,13 @@
 
 Applies on top of the root `AGENTS.md` (prompt-caching invariant, facade + siblings rules).
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/agent/
+scripts/run_tests.sh tests/agent/test_foo.py -k test_name
+```
+
 ## Shape
 
 `run_agent.py` is the public facade: `AIAgent` is assembled from mixins (`agent/turn_facade.py`,

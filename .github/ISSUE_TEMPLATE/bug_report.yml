@@ -12,6 +12,7 @@ body:
         - [ ] Search [existing issues](https://github.com/NousResearch/hermes-agent/issues) to avoid duplicates
         - [ ] Update to the latest version (`hermes update`) and confirm the bug still exists
         - [ ] Run `hermes debug share` and paste the links below (see Debug Report section)
+        - [ ] Contributors: reproduce with scoped tests per [AGENTS.md](https://github.com/NousResearch/hermes-agent/blob/main/AGENTS.md) (`scripts/run_tests.sh tests/<area>/`)
 
   - type: textarea
     id: description

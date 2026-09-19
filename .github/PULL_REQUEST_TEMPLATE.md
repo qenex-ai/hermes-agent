@@ -46,7 +46,8 @@ Fixes #
 - [ ] My commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`fix(scope):`, `feat(scope):`, etc.)
 - [ ] I searched for [existing PRs](https://github.com/NousResearch/hermes-agent/pulls) to make sure this isn't a duplicate
 - [ ] My PR contains **only** changes related to this fix/feature (no unrelated commits)
-- [ ] I've run `pytest tests/ -q` and all tests pass
+- [ ] I've run the relevant tests (`scripts/run_tests.sh tests/<area>/` — never bare `pytest`; see [AGENTS.md](https://github.com/NousResearch/hermes-agent/blob/main/AGENTS.md))
+- [ ] If I changed `.ts`/`.tsx`/JS workspaces, I've run `npm run check` (CI may skip Python on JS-only PRs)
 - [ ] I've added tests for my changes (required for bug fixes, strongly encouraged for features)
 - [ ] I've tested on my platform: <!-- e.g. Ubuntu 24.04, macOS 15.2, Windows 11 -->
 

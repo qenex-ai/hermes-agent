@@ -2,6 +2,15 @@
 
 Applies on top of the root `AGENTS.md`. Long-form: `website/docs/developer-guide/cli-internals.md`.
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/hermes_cli/
+hermes --help
+hermes setup --help
+scripts/run_tests.sh tests/hermes_cli/test_profiles.py -k test_name   # example scoped run
+```
+
 ## CLI architecture
 
 `cli.py` holds `HermesCLI` (REPL loop, config, slash dispatch); behaviour lives in mixins

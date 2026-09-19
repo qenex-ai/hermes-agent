@@ -3,6 +3,13 @@
 Applies on top of the root `AGENTS.md`. Long-form: `website/docs/developer-guide/gateway-internals.md`.
 New platform adapter: follow `gateway/platforms/ADDING_A_PLATFORM.md` step by step.
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/gateway/
+scripts/run_tests.sh tests/gateway/test_stream_final_contract.py   # streaming contract
+```
+
 ## Shape
 
 `gateway/run.py` is the facade; phases live in `run_*.py` (startup, adapters, inbound, turn, busy,

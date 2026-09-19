@@ -4,6 +4,13 @@ Applies on top of the root `AGENTS.md`: settle the **Footprint Ladder** before a
 Most capabilities should NOT be core tools. Long-form: `website/docs/developer-guide/adding-tools.md`,
 `tools-runtime.md`.
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/tools/
+scripts/run_tests.sh tests/tools/test_approval_config_readonly.py   # E2E-style example
+```
+
 ## Registry and discovery
 
 `tools/registry.py` has no deps and is imported by every tool file; each `tools/*.py` calls

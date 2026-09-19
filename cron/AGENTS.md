@@ -3,6 +3,14 @@
 Applies on top of the root `AGENTS.md`. Long-form: `website/docs/developer-guide/cron-internals.md`;
 user docs `website/docs/user-guide/features/cron.md`, `kanban.md`.
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/cron/
+scripts/run_tests.sh tests/hermes_cli/test_kanban.py -k test_name   # kanban CLI
+hermes cron list
+```
+
 ## Cron
 
 `cron/jobs.py` (job store) + `cron/scheduler.py` (tick loop; `scheduler_*.py` siblings). Agents

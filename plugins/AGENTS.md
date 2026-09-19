@@ -4,6 +4,14 @@ Applies on top of the root `AGENTS.md`. Authoring guide + canonical compat contr
 `website/docs/developer-guide/plugins/index.md`. Per-kind guides: `memory-provider-plugin.md`,
 `model-provider-plugin.md`, `context-engine-plugin.md`, `image-gen-provider-plugin.md`, ...
 
+## Commands
+
+```bash
+scripts/run_tests.sh tests/plugins/
+hermes plugins list
+hermes plugins validate
+```
+
 ## Plugins never touch core (Teknium, May 2026)
 
 Plugins live in their own directory and work within the ABCs / hooks / `ctx` surface we provide.
@@ -77,11 +85,13 @@ native `api:` match, or version literals on unrelated payloads. Documented surfa
 - Compat tests load **frozen plugins through the real discovery path** and assert outcomes — never
   exact registry/catalog counts, source-reading tests, or "a global version literal changed".
 
-## Sep 2026 decomposition compat window (ends 2026-09-14)
+## Sep 2026 decomposition compat window (removal scheduled)
 
 PR #102117 moved internals into `<stem>_<topic>` siblings. Old import paths resolve through
 `PLUGIN-COMPAT` `__getattr__` blocks (listed in `COMPAT_MANIFEST.md` / `compat_manifest.json`)
-until `hermes_cli.plugin_compat.COMPAT_REMOVAL_DATE`, when the commit that added them is reverted.
+until `hermes_cli.plugin_compat.COMPAT_REMOVAL_DATE` (see that module — past that date, hitting
+plugins are skipped unless `plugins.allow_deprecated_imports: true`), when the commit that added
+them is reverted.
 `hermes_cli/plugin_compat.py` is the single source: `scan_plugin` (AST scan), `compat_report`
 (hits across enabled external plugins, cached to `HERMES_HOME/.plugin-compat-report.json`,
 refreshed by discovery), `removal_in_effect`, `warn_once`. Surfaces: CLI banner notice,

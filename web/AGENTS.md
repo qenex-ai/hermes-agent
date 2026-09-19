@@ -4,6 +4,15 @@ Applies on top of the root `AGENTS.md`. Backend routers: `hermes_cli/web_routers
 dashboard surface, mounted by `hermes_cli/web_server.py` (+ `web_server_*.py` siblings). Frontend:
 `web/src/`. Shared JSON-RPC/WS client: `apps/shared` (`@hermes/shared`), also used by the desktop.
 
+## Commands
+
+```bash
+npm run check --workspace web
+npm run dev --workspace web          # Vite dev server
+npm run build --workspace web        # output → hermes_cli/web_dist (dashboard)
+scripts/run_tests.sh tests/hermes_cli/   # Python routers + pty bridge
+```
+
 ## The dashboard embeds the REAL `hermes --tui` — not a rewrite
 
 `hermes_cli/pty_bridge.py` + the `@app.websocket("/api/pty")` endpoint in `web_server.py`:
