@@ -185,6 +185,37 @@ Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync 
 into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
 script; per-boot services belong in the environment `start` command or `terminals`.
 
+**Checkout paths:** this tree may be mounted as `/workspace` (Cursor Cloud) or
+`/root/hermes-src` (deploy); they are the same repo — use whichever path exists.
+
+### Build & lint (verified invocations)
+
+```bash
+# Python env (matches scripts/cloud-agent-install.sh / CI test extras)
+uv sync --frozen --python "$(cat .python-version 2>/dev/null || echo 3.11)" \
+  --extra all --extra dev --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
+source .venv/bin/activate
+
+# Python tests — always via the wrapper (never bare pytest); see Testing below
+scripts/run_tests.sh
+scripts/run_tests.sh tests/hermes_cli/test_foo.py -k test_name
+
+# Python lint (blocking: .github/workflows/lint.yml)
+uv tool install ruff ty
+ruff check .
+
+# In-tree compat guard (CI lint job)
+python scripts/check_compat_pointers.py
+
+# JS/TS (CI: .github/workflows/js-tests.yml — each workspace `check` script)
+npm ci
+npm run check    # root package.json → npm run --ws check
+
+# Dashboard static bundle for `hermes dashboard` (also built in cloud-agent-install)
+npm run build --workspace web
+```
+
 ## Project Structure
 
 Counts shift constantly; the filesystem is canonical. Load-bearing entry points:
@@ -325,10 +356,20 @@ with API keys set has caused repeated "works locally, fails in CI" incidents (an
 
 ```bash
 scripts/run_tests.sh                                    # full suite
+scripts/run_tests.sh -j 4                               # cap parallel file workers
 scripts/run_tests.sh tests/gateway/                     # one directory
 scripts/run_tests.sh tests/agent/test_foo.py -k test_x  # runner is file-granular; -k narrows
 scripts/run_tests.sh -v --tb=long                       # pytest flags pass through
 ```
+
+#### Why the wrapper
+
+| | Without wrapper | With `scripts/run_tests.sh` |
+| --- | --- | --- |
+| Provider API keys | Whatever is in your env | Credential vars unset (CI parity) |
+| `HERMES_HOME` / `~/.hermes/` | Your real config | Temp dir per run |
+| Timezone / locale | Host defaults | `TZ=UTC`, `LANG=C.UTF-8`, `PYTHONHASHSEED=0` |
+| Isolation | Shared interpreter | One subprocess per test **file** (`run_tests_parallel.py`) |
 
 - **Flake policy:** a failing FILE is retried once in a fresh subprocess (`--file-retries`;
   `HERMES_TEST_FILE_RETRIES=0` disables). Pass-on-retry is green but printed under `⚠ FLAKY`
