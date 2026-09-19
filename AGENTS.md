@@ -5,6 +5,9 @@ This root file holds only what applies everywhere. Each area has its own `AGENTS
 ~8k chars; `agent/subdirectory_hints.py` delivers up to 32k and truncates head/tail with a warning
 past that); see the **routing table** at the end and read the area file before editing in that area.
 
+**Repo root:** the git checkout directory (e.g. `/root/hermes-src` on Cloud Agent, or your local
+clone). Run all commands below from that root unless an area doc says otherwise.
+
 **Never give up on the right solution.**
 
 ## What Hermes Is
@@ -175,15 +178,60 @@ session-scoped. Assert the GUI session gets the tool **with the env var absent**
 
 ## Development Environment
 
+**Toolchain (from manifests and CI — do not guess):**
+
+| Piece | What to use | Where it is defined |
+|---|---|---|
+| Python | **3.11** (not 3.14) | `.python-version`, `requires-python` in `pyproject.toml` |
+| Python env | **`uv`** + `uv.lock` | `.github/workflows/tests.yml`, `scripts/cloud-agent-install.sh` |
+| CLI entry | `hermes` | `pyproject.toml` → `hermes_cli.main:main` |
+| Node | **26** (use `nvm` / `.nvmrc`) | `.nvmrc`, root `package.json` `engines`, `js-tests.yml` |
+| JS layout | npm workspaces | Root `package.json` → `apps/*`, `ui-tui`, `web`, `tests-js` |
+
+### Setup
+
 ```bash
+# Idempotent bootstrap (Cursor Cloud / fresh machine): .venv, Node, web dashboard → hermes_cli/web_dist
+scripts/cloud-agent-install.sh
+
+# Manual Python env — match CI tests job (cloud install uses --frozen instead of --locked)
+uv sync --locked --python 3.11 --extra all --extra dev \
+  --extra anthropic --extra mistral --extra fal \
+  --extra modal --extra daytona --extra hindsight --extra parallel-web
 source .venv/bin/activate   # or: source venv/bin/activate
 ```
+
 `scripts/run_tests.sh` probes `.venv`, then `venv`, then `$HOME/.hermes/hermes-agent/venv`
-(worktrees sharing the main checkout's venv).
+(worktrees sharing the main checkout's venv). A release venv under `~/.hermes/` may exist but
+often has **no pytest** — prefer a repo-local `.venv` from `uv sync`.
+
+For JavaScript/TypeScript surfaces (desktop, TUI, dashboard SPA, `tests-js`):
+
+```bash
+npm ci                                    # full workspace install (CI)
+npm run check                             # each workspace's `check` script
+node .github/scripts/run-workspace-checks.mjs   # CI: parallel `check:*` sub-scripts
+npm run fix                               # workspace auto-fix where defined
+```
+
+Docusaurus docs site: `website/` is its own package (`npm ci` + `npm run build` inside `website/`).
+The **`web`** workspace is the embedded dashboard built into `hermes_cli/web_dist`.
 
 Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --frozen`
 into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
 script; per-boot services belong in the environment `start` command or `terminals`.
+
+### Lint and static checks (CI-blocking subset)
+
+```bash
+source .venv/bin/activate
+ruff check .                              # rules in [tool.ruff.lint.select] (pyproject.toml)
+python scripts/check_compat_pointers.py   # in-tree code must not import PLUGIN-COMPAT paths
+python scripts/check-windows-footguns.py --all
+ty check                                  # advisory on PRs; installed via `--extra dev`
+```
+
+After changing dependencies in `pyproject.toml`: run `uv lock` and commit `uv.lock`.
 
 ## Project Structure
 
