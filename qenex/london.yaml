@@ -18,8 +18,10 @@ mcp:
   origin: https://mcp.qenex.ai
   jsonrpc: POST /
   sse: GET /sse
+  streamable_http_alias: POST /mcp  # Grok CLI + some clients; same handler as POST /
   oauth_resource: https://mcp.qenex.ai
-  do_not_use: POST /mcp
+  grok_connector_url: https://mcp.qenex.ai  # or https://mcp.qenex.ai/mcp after qenex-edge patch
+  oauth_redirect_suffixes: [grok.com, x.ai]  # DCR allowlist (qenex_mcp_server.py)
 
 grok:
   # Preferred reasoning plane for Cursor Ultra. London MCP active_provider

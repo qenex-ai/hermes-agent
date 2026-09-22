@@ -59,6 +59,14 @@ The committed URL is therefore the **origin**, which matches the OAuth resource 
 
 Do not put bearer tokens in `mcp.json`. Let Cursor’s OAuth flow (or your user-level Cursor MCP headers) supply credentials.
 
+### Grok.com custom connector
+
+At [grok.com/connectors](https://grok.com/connectors) → **New connector** → **Custom**, use **`https://mcp.qenex.ai`** (origin, not `/mcp`, until the London MCP patch is deployed).
+
+Grok registers OAuth clients from xAI’s cloud with **HTTPS redirect URIs on `grok.com` / `x.ai`**, not loopback. If DCR fails with `invalid_redirect_uri`, apply the patch in `qenex/patches/qenex-edge-grok-mcp/` on `root/qenex-edge` and restart `qenex-mcp-server.service`. Policy reference: `qenex/mcp_oauth_redirect.py`.
+
+After the patch, Grok CLI may also use `https://mcp.qenex.ai/mcp` (same as Linear’s `/mcp` URL shape).
+
 ### `supabase` (HTTP MCP)
 
 ```json

@@ -1,0 +1,34 @@
+# Insert after _ALLOWED_REDIRECT_SCHEMES block in qenex_mcp_server.py
+
+# xAI Grok custom connectors (grok.com/connectors) — DCR uses HTTPS callbacks on
+# grok.com / x.ai (cloud agent), not loopback. Single-tenant xAI domains only.
+_ALLOWED_REDIRECT_DOMAIN_SUFFIXES = (
+    "grok.com",
+    "x.ai",
+)
+
+
+def _redirect_host_allowed(hostname: str | None) -> bool:
+    if not hostname:
+        return False
+    host = hostname.lower()
+    if host in _ALLOWED_REDIRECT_HOSTS:
+        return True
+    for suffix in _ALLOWED_REDIRECT_DOMAIN_SUFFIXES:
+        if host == suffix or host.endswith("." + suffix):
+            return True
+    return False
+
+
+# Replace body of _redirect_uri_allowed with:
+def _redirect_uri_allowed(uri: str) -> bool:
+    try:
+        parsed = urlparse(uri)
+    except Exception:
+        return False
+    scheme = (parsed.scheme or "").lower()
+    if scheme in _ALLOWED_REDIRECT_SCHEMES:
+        return True
+    if scheme not in ("http", "https"):
+        return False
+    return _redirect_host_allowed(parsed.hostname)

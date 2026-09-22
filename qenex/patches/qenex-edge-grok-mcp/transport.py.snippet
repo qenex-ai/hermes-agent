@@ -1,0 +1,10 @@
+# qenex_core/mcp/transport.py
+
+_MCP_ORIGIN = "https://mcp.qenex.ai"
+_OAUTH_PRM = f"{_MCP_ORIGIN}/.well-known/oauth-protected-resource"
+
+# In _unauthorized() headers:
+#   f'Bearer realm="mcp.qenex.ai", resource_metadata="{_OAUTH_PRM}", scope="mcp"'
+
+# In build_mcp_server() routes list, add (same handler as "/"):
+#   Route("/mcp", endpoint=_ASGIEndpoint(handle_root_endpoint), methods=["GET", "POST", "DELETE"]),
