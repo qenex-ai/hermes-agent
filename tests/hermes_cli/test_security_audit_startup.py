@@ -55,6 +55,32 @@ def test_run_security_audit_clean_posture(monkeypatch, tmp_path):
     assert audit.run_security_audit(hermes_home=tmp_path, config={}) == []
 
 
+def test_webhook_public_bind_warns_on_default_host():
+    msg = audit._webhook_public_bind({"platforms": {"webhook": {"enabled": True, "extra": {}}}})
+    assert msg is not None
+    assert "Webhook adapter" in msg
+
+
+def test_webhook_public_bind_silent_on_loopback():
+    assert audit._webhook_public_bind(
+        {"platforms": {"webhook": {"enabled": True, "extra": {"host": "127.0.0.1"}}}}
+    ) is None
+
+
+def test_local_terminal_with_messaging_warns():
+    msg = audit._local_terminal_with_messaging(
+        {"terminal": {"backend": "local"}, "platforms": {"telegram": {"enabled": True}}}
+    )
+    assert msg is not None
+    assert "local" in msg.lower()
+
+
+def test_local_terminal_with_messaging_silent_when_sandboxed():
+    assert audit._local_terminal_with_messaging(
+        {"terminal": {"backend": "docker"}, "platforms": {"telegram": {"enabled": True}}}
+    ) is None
+
+
 def test_log_startup_security_warnings_emits_and_is_idempotent(monkeypatch, tmp_path, caplog):
     import logging
 

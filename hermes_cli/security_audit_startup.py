@@ -118,6 +118,47 @@ def _container_no_volume_mount(hermes_home: Optional[Path]) -> Optional[str]:
             "volume over the HERMES_HOME data directory.")
 
 
+def _webhook_public_bind(config: Optional[dict]) -> Optional[str]:
+    """Warn when the webhook adapter listens beyond loopback (default bind is all interfaces)."""
+    plats = (config or {}).get("platforms") or {}
+    webhook = plats.get("webhook") if isinstance(plats, dict) else None
+    if not (isinstance(webhook, dict) and webhook.get("enabled")):
+        return None
+    from gateway.platforms.base import is_network_accessible
+
+    extra = webhook.get("extra") or {}
+    host = extra.get("host")
+    # Falsy host → aiohttp binds all address families (public by default).
+    bind_label = str(host).strip() if host else "all interfaces (default)"
+    if host and not is_network_accessible(str(host).strip()):
+        return None
+    return (f"Webhook adapter is network-accessible ({bind_label}). Unsigned probes are rejected, but "
+            "a leaked HMAC secret grants agent dispatch. Prefer loopback + reverse proxy, or a "
+            "non-default terminal backend / container wrap for untrusted webhook payloads.")
+
+
+def _local_terminal_with_messaging(config: Optional[dict]) -> Optional[str]:
+    """Warn when messaging gateways run with the default local terminal backend (no OS isolation)."""
+    term = (config or {}).get("terminal") or {}
+    backend = str(term.get("backend") or "local").strip().lower()
+    if backend not in ("", "local"):
+        return None
+    plats = (config or {}).get("platforms") or {}
+    if not isinstance(plats, dict):
+        return None
+    enabled = [
+        name for name, cfg in plats.items()
+        if name != "webhook" and isinstance(cfg, dict) and cfg.get("enabled")
+    ]
+    if not enabled:
+        return None
+    names = ", ".join(sorted(enabled)[:8])
+    suffix = "…" if len(enabled) > 8 else ""
+    return (f"Terminal backend is 'local' while messaging platforms are enabled ({names}{suffix}). "
+            "Inbound channel content is untrusted input — use a sandboxed terminal backend or run "
+            "the whole agent in a container (see SECURITY.md §2.2).")
+
+
 def _network_listener_without_auth(config: Optional[dict]) -> list[str]:
     """Warn about a network-accessible API server with no API_SERVER_KEY. Read-only against
     config + env; overlaps the hard fail-closed guards but surfaces the posture at startup.
@@ -145,6 +186,7 @@ def run_security_audit(*, hermes_home: Optional[Path] = None, config: Optional[d
     """
     findings: list[str] = []
     for check in (_running_as_root, _ssh_password_auth_enabled, lambda: _container_no_volume_mount(hermes_home),
+                  lambda: _webhook_public_bind(config), lambda: _local_terminal_with_messaging(config),
                   lambda: _network_listener_without_auth(config)):
         try:
             r = check()
