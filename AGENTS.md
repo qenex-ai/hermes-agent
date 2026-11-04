@@ -68,6 +68,10 @@ runs, with CI's pinned tools; `--install-hook pre-push` runs it on every push (r
 pulling to refresh the hook). `# noqa` does not waive a ratchet finding:
 `# health: allow <RULE> -- <why>` does.
 
+Cursor Cloud bootstrap is `scripts/cloud-agent-install.sh` (idempotent `uv sync --frozen`
+into `.venv`, Node via nvm, web dashboard build). Do not put a foreground server in that
+script; per-boot services belong in the environment `start` command or `terminals`.
+
 ## Project Structure
 
 Counts shift constantly; the filesystem is canonical. Load-bearing entry points:

@@ -1,0 +1,62 @@
+name: Vercel prebuilt deploy
+description: >-
+  Pull Vercel project settings, build in this runner (so website Python
+  generators run), and deploy the artifact with `vercel deploy --prebuilt`.
+  Auth is VERCEL_TOKEN in the environment, never `--token` on argv.
+
+inputs:
+  environment:
+    description: Vercel target (`preview` or `production`).
+    required: true
+
+outputs:
+  url:
+    description: Deployment URL from `vercel deploy --prebuilt`.
+    value: ${{ steps.deploy.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve pinned Vercel CLI spec
+      id: spec
+      shell: bash
+      run: echo "spec=$(python3 scripts/ci/vercel_deploy.py install-spec)" >> "$GITHUB_OUTPUT"
+
+    - name: Install pinned Vercel CLI
+      uses: ./.github/actions/retry
+      with:
+        command: npm install --global ${{ steps.spec.outputs.spec }}
+
+    - name: Pull Vercel environment
+      shell: bash
+      env:
+        VERCEL_TOKEN: ${{ env.VERCEL_TOKEN }}
+        VERCEL_ORG_ID: ${{ env.VERCEL_ORG_ID }}
+        VERCEL_PROJECT_ID: ${{ env.VERCEL_PROJECT_ID }}
+        VERCEL_DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_REF: ${{ github.ref }}
+      run: python3 scripts/ci/vercel_deploy.py pull
+
+    - name: Build Vercel artifacts
+      shell: bash
+      env:
+        VERCEL_TOKEN: ${{ env.VERCEL_TOKEN }}
+        VERCEL_ORG_ID: ${{ env.VERCEL_ORG_ID }}
+        VERCEL_PROJECT_ID: ${{ env.VERCEL_PROJECT_ID }}
+        VERCEL_DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_REF: ${{ github.ref }}
+      run: python3 scripts/ci/vercel_deploy.py build
+
+    - name: Deploy prebuilt artifacts
+      id: deploy
+      shell: bash
+      env:
+        VERCEL_TOKEN: ${{ env.VERCEL_TOKEN }}
+        VERCEL_ORG_ID: ${{ env.VERCEL_ORG_ID }}
+        VERCEL_PROJECT_ID: ${{ env.VERCEL_PROJECT_ID }}
+        VERCEL_DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_REF: ${{ github.ref }}
+      run: python3 scripts/ci/vercel_deploy.py deploy

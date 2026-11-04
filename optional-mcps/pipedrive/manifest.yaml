@@ -1,0 +1,43 @@
+# Nous-approved MCP catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: pipedrive
+description: 'Sales CRM: deals, leads, contacts, activities, and notes.'
+source: https://support.pipedrive.com/en/article/mcp
+
+# Official vendor-hosted remote MCP (URL-only — Hermes never spawns a local
+# process for this entry). Native OAuth 2.1 + Dynamic Client Registration
+# (verified live 2026-09-10: RFC 9728 protected-resource metadata at
+# https://mcp.pipedrive.ai/.well-known/oauth-protected-resource with
+# resource=https://mcp.pipedrive.ai/mcp -> AS https://oauth.pipedrive.com
+# with registration_endpoint). Hermes's MCP client + mcp_oauth_manager
+# handle discovery, PKCE, token exchange, and refresh.
+#
+# Path note (opposite of QENEX): origin and /sse 301 to pipedrive.com;
+# only POST /mcp is the Streamable HTTP endpoint (401 + Bearer until authed).
+
+transport:
+  type: http
+  url: https://mcp.pipedrive.ai/mcp
+
+auth:
+  type: oauth
+
+# Composer-suggestion triggers (desktop brand pills).
+suggest:
+  keywords:
+    - pipedrive
+    - crm
+  hosts:
+    - pipedrive.com
+
+post_install: |
+  On first connection Hermes opens a browser to authorize with
+  Pipedrive (or run `hermes mcp login pipedrive`). Approve access
+  for your Pipedrive user; tools inherit that user's role and
+  visibility. Then restart the session so tools load.
+
+  Claude.ai / Claude Desktop: Customize → Connectors → Add custom
+  connector, name "Pipedrive MCP BETA", URL https://mcp.pipedrive.ai/mcp.
+  Official steps: https://support.pipedrive.com/en/article/mcp-claude

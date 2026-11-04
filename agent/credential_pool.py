@@ -2865,6 +2865,19 @@ def _seed_from_env(provider: str, entries: list[PooledCredential]) -> tuple[bool
         return seed.result
 
     if provider == "openrouter":
+        from hermes_cli.billing_wallet import company_openrouter_wallet_eligible
+
+        requested = ""
+        try:
+            from hermes_cli.config import load_config
+
+            cfg = load_config() or {}
+            model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+            requested = str(model_cfg.get("provider") or "")
+        except Exception:
+            requested = ""
+        if not company_openrouter_wallet_eligible(requested=requested):
+            return seed.result
         for env_var in _env_key_var_candidates(["OPENROUTER_API_KEY"], entries):
             token = get_env_prefer_dotenv(env_var)
             if token and seed.upsert(

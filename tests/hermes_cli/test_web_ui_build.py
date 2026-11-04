@@ -35,8 +35,6 @@ def _make_web_dir(tmp_path: Path) -> tuple[Path, Path]:
     return web_dir, dist_dir
 
 
-
-@pytest.mark.platforms("posix")
 def test_web_build_prepares_once_and_skips_a_current_product(source_products):
     root, acquired = source_products
     assert _build_web_ui(root / "web", fatal=True)

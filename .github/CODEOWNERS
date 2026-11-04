@@ -60,3 +60,8 @@ uv.lock                         @NousResearch/hermes-agent-core
 # The trust model and the scope authority for security reports.
 /SECURITY.md                    @NousResearch/hermes-agent-core
 
+
+# QENEX-specific ownership (from main)
+* @abdulrahman305
+SECURITY.md @abdulrahman305
+.github/ @abdulrahman305

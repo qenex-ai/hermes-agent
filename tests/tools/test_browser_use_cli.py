@@ -248,14 +248,15 @@ class TestLegacyCloudMigration:
         assert bu_cli.is_legacy_browser_use_cloud_config({"cloud_provider": "browserbase"}) is False
 
 
-    def test_auto_detect_with_key_migrates(self, monkeypatch):
-        """No cloud_provider configured + BROWSER_USE_API_KEY set: credential
-        auto-detection prefers Browser Use (even when Browserbase creds are
-        also present), which means the CLI's native Browser Use cloud."""
+    def test_auto_detect_with_key_does_not_migrate(self, monkeypatch):
+        """No cloud_provider configured + BROWSER_USE_API_KEY set: key presence
+        is not consent to spend Browser Use."""
+        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: {})
         monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
         monkeypatch.setenv("BROWSERBASE_API_KEY", "bb-key")
         monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
-        assert bu_cli.is_legacy_browser_use_cloud_config({}) is True
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
+        assert bu_cli.is_legacy_browser_use_cloud_config({}) is False
 
 
     def test_migrated_config_gets_bu_autospawn(self, tmp_path, monkeypatch):

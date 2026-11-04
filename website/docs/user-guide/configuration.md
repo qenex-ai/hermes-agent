@@ -227,7 +227,7 @@ updates:
   pre_update_backup: quick       # quick (state snapshot, default) | full (snapshot + HERMES_HOME zip) | off
   backup_keep: 5                 # Keep this many full pre-update backup zips
   non_interactive_local_changes: stash  # stash | discard
-  auto_switch_parked_branch: true       # auto-switch a clean, fully merged parked branch back to main
+  auto_switch_parked_branch: true       # auto-switch a parked branch back to main (dirty trees are stashed and parked)
 ```
 
 `pre_update_backup` is the single pre-update safety knob: `quick` (default) snapshots critical state files (pairing data, cron jobs, config, auth; files over 1 GiB are skipped) into `state-snapshots/`; `full` additionally zips all of `HERMES_HOME` into `backups/` and can add minutes on large homes; `off` disables both. Legacy booleans are honored (`true` → `full`, `false` → `off`).
@@ -3252,7 +3252,7 @@ network:
   force_ipv4: false   # Force IPv4 for outbound connections (default: false)
 ```
 
-`force_ipv4` — on servers with broken or unreachable IPv6, Python resolves AAAA records first and can hang for the full TCP timeout before falling back to IPv4. Hermes already races IPv6 and IPv4 for every outbound connection it makes (Happy Eyeballs, RFC 8305: the IPv4 attempt starts 250 ms after IPv6 and whichever connects first wins), so an advertised-but-blackholed IPv6 route costs about a quarter second per connection instead of the full timeout. This covers the gateway's WebSocket dials (relay connector, platform adapters) as well as HTTP. Set this to `true` only when you want to skip IPv6 entirely and connect over IPv4 directly. `hermes doctor` runs an `IPv6 route` check that detects a dead IPv6 path and points at this setting.
+`force_ipv4` — on servers with broken or unreachable IPv6, Python resolves AAAA records first and can hang for the full TCP timeout before falling back to IPv4. Hermes already races IPv6 and IPv4 for every outbound connection it makes (Happy Eyeballs, RFC 8305: the IPv4 attempt starts 250 ms after IPv6 and whichever connects first wins), so an advertised-but-blackholed IPv6 route costs about a quarter second per connection instead of the full timeout. This covers the gateway's WebSocket dials (relay connector, platform adapters) as well as HTTP. Set this to `true` only when you want to skip IPv6 entirely and connect over IPv4 directly. `hermes doctor` runs an `IPv6 route` check that detects a dead IPv6 path and points at this setting. Hosts that cannot create IPv6 sockets at all (`[Errno 97] Address family not supported by protocol`, common in Docker/cloud VMs) auto-prefer IPv4 even when this stays `false`, so dashboard provider login (including xAI Grok OAuth) does not 500.
 
 ## Onboarding
 

@@ -71,7 +71,7 @@ def test_session_cookies_use_host_prefix_on_https_direct():
     provider = next(c for c in cookies if c.startswith(f"__Host-{SESSION_PROVIDER_COOKIE}=nous"))
     for c in (at, rt, provider):
         assert "HttpOnly" in c
-        assert "samesite=lax" in c.lower()
+        assert "samesite=strict" in c.lower()
         assert "Secure" in c
         assert "Path=/" in c
 
@@ -84,6 +84,7 @@ def test_session_cookies_use_secure_prefix_when_proxied():
     cookies = r.headers.get_list("set-cookie")
     at = next(c for c in cookies if c.startswith(f"__Secure-{SESSION_AT_COOKIE}="))
     assert "Path=/hermes" in at
+    assert "samesite=strict" in at.lower()
     assert "Secure" in at
     # __Host- variant must NOT be emitted on the prefix path.
     assert not any(
@@ -107,6 +108,7 @@ def test_session_cookies_use_bare_name_on_http():
     # No Secure flag (HTTP).
     at = next(c for c in cookies if c.startswith(f"{SESSION_AT_COOKIE}="))
     assert "; Secure" not in at
+    assert "samesite=strict" in at.lower()
 
 
 
@@ -524,7 +526,10 @@ def test_clear_session_cookies_prefixed_deletions_carry_secure():
             c for c in cookies
             if c.startswith(f'{name}="') and not c.startswith("__")
         )
-        # Bare-name deletion mirrors the bare setter (Lax, no Secure) so
+        # Bare-name deletion mirrors the bare setter (Strict, no Secure) so
         # it still works on plain-HTTP origins.
         assert "; Secure" not in bare
+        assert "samesite=strict" in bare.lower()
         assert "Max-Age=0" in bare
+        assert "samesite=strict" in host.lower()
+        assert "samesite=strict" in secure.lower()

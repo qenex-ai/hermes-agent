@@ -1109,8 +1109,13 @@ hermes plugins install mcp-serve
 
 It used to be built in as `hermes mcp serve`. An MCP client configured with `"args": ["mcp", "serve"]` changes them to `["mcp-serve"]`; the tool names and parameters are unchanged, and `hermes mcp serve` now prints the new spelling and the install line. Tools, the `--tools` mode and its safety limits are documented in the [plugin's README](https://github.com/NousResearch/hermes-official-plugins/tree/main/mcp-serve).
 
+
+**Cursor IDE** uses Hermes as MCP tools, not as an ACP agent. This checkout ships [`.cursor/mcp.json`](https://github.com/qenex-ai/hermes-agent/blob/main/.cursor/mcp.json) (`hermes` stdio + `qenex` HTTP + project-scoped `supabase` HTTP + Pipedrive HTTP + Sourcegraph HTTP). See [Use Hermes MCP in Cursor IDE](../../guides/cursor-mcp.md) for the MCP vs ACP decision, the QENEX OAuth/`/mcp` path note, Pipedrive’s `/mcp` URL, Sourcegraph’s `/.api/mcp` URL, and the venv fallback.
+
 ## Related docs
 
+- [Use Hermes MCP in Cursor IDE](../../guides/cursor-mcp.md)
+- [ACP Host Integration](../../user-guide/features/acp.md) (Zed / JetBrains / VS Code — not Cursor)
 - [Use MCP with Hermes](../../guides/use-mcp-with-hermes.md)
 - [CLI Commands](../../reference/cli-commands.md)
 - [Slash Commands](../../reference/slash-commands.md)

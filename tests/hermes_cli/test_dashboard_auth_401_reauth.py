@@ -117,6 +117,10 @@ class TestRefreshTokenCookieDeprecation:
             SESSION_RT_COOKIE in c and "Max-Age=0" in c
             for c in cookies
         )
+        assert any(
+            SESSION_AT_COOKIE in c and "samesite=strict" in c.lower()
+            for c in cookies
+        )
 
 
 # ---------------------------------------------------------------------------

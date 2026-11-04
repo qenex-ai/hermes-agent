@@ -871,6 +871,74 @@ def _index_lock_holder(git_dir: Path, root: Path | None) -> str:
     return f"a running git ({held})" if isinstance(held, _Holder) else "a running git"
 
 
+def _heal_missing_origin(root: Path) -> None:
+    """Restore a missing ``origin`` remote on every launch. Never raises.
+
+    ``hermes update`` cannot pull a fix into a checkout that cannot
+    ``git fetch origin``. The TUI / CLI start this on every ``hermes``
+    invocation, so origin is healed before the user even runs update.
+    Stdlib + ``update_cmd_git`` helpers only — never import ``update_cmd``
+    or ``main`` (this runs before ``main`` finishes importing).
+    """
+    try:
+        if not (root / ".git").exists():
+            return
+        from hermes_cli.update_cmd_git import (
+            OFFICIAL_REPO_URL,
+            _candidate_origin_from_remotes,
+            _origin_url_looks_fetchable,
+            _parse_remote_config_urls,
+            _recalled_origin_url,
+            _remember_origin_url,
+        )
+
+        def _git(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                ["git", *args],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+            )
+
+        existing = (_git("config", "--get", "remote.origin.url").stdout or "").strip()
+        if existing and _origin_url_looks_fetchable(existing):
+            _remember_origin_url(existing)
+            return
+        listed = (_git("remote").stdout or "")
+        names = {line.strip() for line in listed.splitlines() if line.strip()}
+        pairs = _parse_remote_config_urls(
+            _git("config", "--get-regexp", r"^remote\..*\.url$").stdout or ""
+        )
+        sibling_names = {n for n in names if n != "origin"} | {n for n, _ in pairs if n != "origin"}
+        picked = _candidate_origin_from_remotes(pairs)
+        if picked is None:
+            recalled = _recalled_origin_url()
+            if recalled:
+                picked = ("last successful update", recalled)
+            elif not sibling_names:
+                picked = ("official Hermes repository", OFFICIAL_REPO_URL)
+            else:
+                return
+        _source, url = picked
+        if "origin" in names:
+            _git("remote", "set-url", "origin", url)
+        else:
+            _git("remote", "add", "origin", url)
+        restored = (_git("config", "--get", "remote.origin.url").stdout or "").strip()
+        if not restored:
+            return
+        print(
+            f"⚠ Restored git remote 'origin' ({restored}) so `hermes update` can fetch.",
+            file=sys.stderr,
+        )
+        _remember_origin_url(restored)
+    except Exception:
+        return
+
+
 def _release_dead_lock(lock: Path, root: Path | None = None, *, any_git: bool = False) -> bool:
     """Drop a killed git's ``lock`` (``index.lock`` refuses every git command) once its owner is PROVEN gone.
 
@@ -956,6 +1024,7 @@ def restore_interrupted_pull(project_root: Path | None = None, *, after_failure:
     """
     try:
         root = _project_root() if project_root is None else project_root
+        _heal_missing_origin(root)
         marker = interrupted_pull_marker(root)
         if not marker.is_file() and not (Path(root) / ZIP_SWAP_JOURNAL).is_file():
             return False  # fast path: nothing to repair, no lock taken
@@ -1394,6 +1463,7 @@ def recover_if_needed(project_root: Path | None = None, argv: list[str] | None =
     root = _project_root() if project_root is None else Path(project_root).resolve()
     if not explicit and _pytest_owns_live_checkout(root):
         return False
+    _heal_missing_origin(root)
     from hermes_cli._parser import command_argv
 
     args = command_argv(sys.argv[1:] if argv is None else argv)
@@ -1465,3 +1535,80 @@ def _claim_recovery_lock(root: Path) -> int | None:
         raise
     os.close(fd)
     return None
+
+
+def _complete_pending_core_install(root: Path, core_marker: Path) -> bool:
+    """Run the pending core install BEFORE main.py can import native modules.
+
+    Never raises: any failure leaves the marker for the post-import path and returns ``False``.
+    Returns ``True`` only after the install succeeds.
+
+    ``recover_if_needed`` invokes this when ``.update-incomplete`` exists — a prior ``hermes update`` (or
+    the self-lock preflight, #83569) left the dependency sync deliberately unfinished. Completing it here
+    matters on Windows: the deferral exists precisely because the process that wrote the marker had a native
+    venv extension mapped; this process, running before ``hermes_cli.main``'s third-party imports, maps
+    nothing yet, so the installer can replace ``.pyd`` files without hitting the lock.
+    """
+    try:
+        from hermes_cli import _install_repair as ir
+
+        # Read attempts before claiming the lock so a persistently-failing install stops early.
+        attempts = _read_marker_attempts(core_marker)
+        if attempts >= _EARLY_CORE_INSTALL_MAX_ATTEMPTS:
+            print("⚠ Pending interrupted-update install has already failed "
+                  f"{attempts} times in the early pass — leaving it for the "
+                  "post-import recovery path.", file=sys.stderr)
+            return False
+        if not _claim_recovery_lock(root):
+            return False
+        try:
+            if ir._probe_index_unreachable():
+                print("⚠ Package index unreachable — deferring interrupted-install "
+                      "completion this launch. Hermes will keep working from the "
+                      "current venv.", file=sys.stderr)
+                return False
+            print("⚠ A previous `hermes update` was interrupted mid-install — "
+                  "finishing dependency installation now (before any native "
+                  "extensions load)...", file=sys.stderr)
+            ir.run_core_install(root)
+        except Exception as exc:
+            new_attempts = ir.bump_marker_attempts(core_marker)
+            print(f"  ✗ Early interrupted-install completion failed (attempt "
+                  f"{new_attempts}/{_EARLY_CORE_INSTALL_MAX_ATTEMPTS}): {exc}", file=sys.stderr)
+            print("  The next launch will retry; hermes will keep working from "
+                  "the current venv in the meantime.", file=sys.stderr)
+            return False
+        finally:
+            _release_recovery_lock(root)
+
+        try:
+            core_marker.unlink()
+        except OSError:
+            pass
+        print("  ✓ Dependency installation completed in the early pass.", file=sys.stderr)
+        return True
+    except Exception:
+        return False  # Never block launch — the marker stays for the post-import path.
+
+
+def _release_recovery_lock(root: Path) -> None:
+    """Best-effort release of the shared recovery lock."""
+    try:
+        (root / ".update-incomplete.lock").unlink()
+    except OSError:
+        pass
+
+
+def _find_uv_binary() -> str | None:
+    """Locate a ``uv`` binary without importing third-party modules.
+
+    uv-managed base interpreters carry an ``EXTERNALLY-MANAGED`` marker, so the stdlib ``pip``
+    fallback refuses to touch them; the only sanctioned installer is then uv itself, which Hermes
+    vendors (``~/.hermes/bin/uv.exe``) or the user has on PATH.
+    """
+    exe = "uv.exe" if sys.platform == "win32" else "uv"
+    for sub in ((".hermes", "bin"), (".local", "bin"), (".cargo", "bin")):
+        path = Path.home().joinpath(*sub, exe)
+        if path.is_file():
+            return str(path)
+    return shutil.which(exe)

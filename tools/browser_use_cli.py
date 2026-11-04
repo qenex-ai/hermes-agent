@@ -244,7 +244,10 @@ def is_legacy_browser_use_cloud_config(browser_cfg: dict) -> bool:
     if not isinstance(browser_cfg, dict):
         return False
     provider = str(browser_cfg.get("cloud_provider") or "").strip().lower()
-    if provider not in {"browser-use", ""} or _use_gateway(browser_cfg):
+    # Explicit ``cloud_provider: browser-use`` is the operator pick of the pre-CLI
+    # cloud config. An unused BROWSER_USE_API_KEY with cloud_provider unset is not
+    # consent to migrate onto Browser Use.
+    if provider != "browser-use" or _use_gateway(browser_cfg):
         return False
     return _browser_use_api_key_set()
 

@@ -33,10 +33,11 @@ def test_custom_provider_name_canonicalizes_to_durable_slug():
     )
 
 
-def test_unknown_vendor_still_uses_aggregator_fallback():
+def test_unknown_vendor_does_not_persist_openrouter_just_because_a_key_exists():
+    """Holding OPENROUTER_API_KEY is not consent to write OpenRouter into config.yaml."""
     with patch("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "openrouter"):
         assert _normalize({}, "unconfigured-vendor") == (
-            "openrouter",
+            "unconfigured-vendor",
             "vendor/model-a",
         )
 

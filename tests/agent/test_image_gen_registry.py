@@ -73,3 +73,10 @@ class TestGetActiveProvider:
     def test_none_when_empty(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         assert image_gen_registry.get_active_provider() is None
+
+    def test_single_metered_available_does_not_autoresolve(self, tmp_path, monkeypatch):
+        """FAL_KEY sitting unused is not consent to spend fal. Pick it in ``hermes tools``."""
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        image_gen_registry.register_provider(_FakeProvider("fal", available=True))
+        image_gen_registry.register_provider(_FakeProvider("openai", available=False))
+        assert image_gen_registry.get_active_provider() is None

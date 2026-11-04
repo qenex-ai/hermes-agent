@@ -161,6 +161,11 @@ def _resolve_openrouter_runtime(
     from hermes_cli.runtime_provider_custom import _model_cfg_key_env_for, _owning_entry_credential
     declared, entry_key = _owning_entry_credential(rp, base_url) if requested_norm == "custom" else (False, "")
     if is_openrouter_context:
+        from hermes_cli.billing_wallet import (
+            company_openrouter_wallet_eligible, record_billing_hijack,
+        )
+        from hermes_cli.config import get_env_value_prefer_dotenv
+        eligible = company_openrouter_wallet_eligible(requested=requested_norm)
         # Same read order as the credential pool and _resolve_api_key_provider_secret
         # (.env, then scope-aware os.environ, raw op:// references yielding to the resolved
         # scoped value). get_secret_str sees os.environ only, so a key living solely in
@@ -169,7 +174,6 @@ def _resolve_openrouter_runtime(
         # goes only to that origin: another scheme or port on the same host is another endpoint.
         # Unbound, openrouter.ai gets it only when it is OpenRouter-shaped (sk-or-), so a real OpenAI
         # key never reaches a third party.
-        from hermes_cli.config import get_env_value_prefer_dotenv
         openai_key = get_env_value_prefer_dotenv("OPENAI_API_KEY") or ""
         openai_base_url = get_secret_str("OPENAI_BASE_URL", "").strip()
         if base_url_hostname(openai_base_url):
@@ -178,8 +182,16 @@ def _resolve_openrouter_runtime(
         else:
             openai_key_ok = not is_openrouter_url or rp.looks_like_openrouter_key(openai_key)
         candidates = [explicit_api_key]
-        if not declared:  # an owning entry's declared credential replaces the implicit env keys
+        if not declared and eligible:  # an owning entry's declared credential replaces the implicit env keys
             candidates += [get_env_value_prefer_dotenv("OPENROUTER_API_KEY"), openai_key if openai_key_ok else ""]
+        if not eligible:
+            requestor_paid = bool(str(explicit_api_key or "").strip())
+            record_billing_hijack(
+                reason="openrouter-last-rung" if requestor_paid else "openrouter-last-rung-blocked",
+                requested=requested_norm or requested_provider,
+                destination=base_url,
+                requestor_paid=requestor_paid,
+            )
     else:
         # ``model.api_key`` and ``model.key_env`` back a trusted config base_url only; the key_env
         # rung is what a bare ``provider: custom`` block relies on (#67453).
@@ -187,6 +199,16 @@ def _resolve_openrouter_runtime(
                       (_model_cfg_key_env_for(model_cfg, base_url) if use_config_base_url else ""),
                       *([] if declared else rp._host_gated_env_key_candidates(base_url, ollama=True))]
     api_key = next((str(c or "").strip() for c in candidates if rp.has_usable_secret(c)), "") or entry_key
+    # Fail closed only for a hijacked last-rung hop. An operator-selected OpenRouter
+    # request with no key still resolves (historical 401), so `/model openrouter` can prompt.
+    if is_openrouter_context and not api_key and not eligible:
+        raise rp.AuthError(
+            "Billing hijack blocked: OpenRouter was not selected for this request, so the "
+            "company OpenRouter wallet is closed. Supply your own OpenRouter key to pay for "
+            "this route, or set provider to openrouter / auto.",
+            provider="openrouter",
+            code="billing_hijack_blocked",
+        )
     source = "explicit" if (explicit_api_key or explicit_base_url) else "env/config"
     cfg_api_mode = rp._parse_api_mode(model_cfg.get("api_mode"))
     # Explicit "custom" stays "custom" rather than relabeling to "openrouter".

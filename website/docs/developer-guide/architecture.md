@@ -129,7 +129,7 @@ hermes-agent/
 │                             #   signal, weixin, bluebubbles, qqbot, yuanbao
 │                             #   (Home Assistant: `homeassistant` catalog plugin)
 │
-├── acp_adapter/              # ACP server (VS Code / Zed / JetBrains)
+├── acp_adapter/              # ACP server (VS Code / Zed / JetBrains; not Cursor — Cursor uses MCP)
 ├── cron/                     # Scheduler (jobs.py, scheduler.py)
 ├── plugins/memory/           # Memory provider plugins
 ├── plugins/context_engine/   # Context engine plugins
@@ -247,7 +247,7 @@ First-class agent tasks (not shell tasks). Jobs store in JSON, support multiple 
 
 ### ACP Integration
 
-Exposes Hermes as an editor-native agent over stdio/JSON-RPC for VS Code, Zed, and JetBrains.
+Exposes Hermes as an editor-native agent over stdio/JSON-RPC for VS Code, Zed, and JetBrains. Cursor IDE consumes Hermes as MCP tools instead — see [Use Hermes MCP in Cursor IDE](/guides/cursor-mcp).
 
 → [ACP Internals](./acp-internals.md)
 

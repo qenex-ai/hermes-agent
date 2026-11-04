@@ -254,14 +254,23 @@ def lazy_ensure(extra: str) -> None:
         raise ImportError(str(exc))
 
 
-def cached_sdk_client(slot: str, env_var: str, missing_key_error: str, feature: str, factory: Callable[[str], Any]) -> Any:
+def cached_sdk_client(
+    slot: str, env_var: str, missing_key_error: str, feature: str, factory: Callable[[str], Any],
+    *, vendor: str = "", target_url: str = "",
+) -> Any:
     """Lazy-build + cache a vendor SDK client on ``tools.web_tools.<slot>`` (so tests that
     reset ``tools.web_tools._<vendor>_client = None`` see fresh state). Raises ValueError
-    when the key is unset."""
+    when the key is unset. ``vendor`` binds the company key to the official host."""
     import tools.web_tools as _wt
     # Resolved before the cache is consulted: the slot is one per process, but the key can change
     # under it (``/reload``, or each multiplexed profile's secret scope resolving its own key).
     api_key = provider_env(env_var)
+    if vendor:
+        from hermes_cli.billing_wallet import web_company_secret
+
+        api_key = web_company_secret(
+            backend=vendor, company_secret=api_key or "", target_url=target_url,
+        )
     if not api_key:
         raise ValueError(missing_key_error)
     # (key, client) as one value so concurrent builds under different keys can never leave one

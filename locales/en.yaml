@@ -3884,7 +3884,7 @@ tips:
   t221: "/compress <focus topic> allocates 60-70% of the summary budget to your topic and aggressively trims the rest."
   t222: "On second+ compression, the compressor updates the previous summary instead of starting from scratch."
   t223: "Before a gateway session reset, Hermes auto-flushes important facts to memory in the background."
-  t224: "network.force_ipv4: true in config.yaml fixes hangs on servers with broken IPv6 — monkey-patches socket."
+  t224: "network.force_ipv4: true in config.yaml fixes hangs on servers with broken IPv6 — monkey-patches socket. Hosts with no IPv6 sockets (errno 97) auto-prefer IPv4."
   t225: "The terminal tool annotates common exit codes: grep returning 1 = 'No matches found (not an error)'."
   t226: "Failed foreground terminal commands auto-retry up to 3 times with exponential backoff (2s, 4s, 8s)."
   t227: "Bare sudo commands are auto-rewritten to pipe SUDO_PASSWORD from .env — no interactive prompt needed."

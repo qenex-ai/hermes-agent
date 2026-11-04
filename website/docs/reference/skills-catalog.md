@@ -102,6 +102,7 @@ If a skill is missing from this list but present in the repo, the catalog is reg
 | Skill | Description | Path |
 |-------|-------------|------|
 | [`codebase-inspection`](../user-guide/skills/bundled/software-development/software-development-codebase-inspection.md) | Inspect codebases w/ pygount: LOC, languages, ratios. | `software-development/codebase-inspection` |
+| [`cursor-sdk`](../user-guide/skills/bundled/software-development/software-development-cursor-sdk.md) | Run Cursor SDK agents with prompt, send, or resume. | `software-development/cursor-sdk` |
 | [`dogfood`](../user-guide/skills/bundled/software-development/software-development-dogfood.md) | Exploratory QA of web apps: find bugs, evidence, reports. | `software-development/dogfood` |
 | [`github`](../user-guide/skills/bundled/software-development/software-development-github.md) | GitHub via gh CLI: PRs, issues, reviews, repos, auth. | `software-development/github` |
 | [`requesting-code-review`](../user-guide/skills/bundled/software-development/software-development-requesting-code-review.md) | Pre-commit review: security scan, quality gates, auto-fix. | `software-development/requesting-code-review` |

@@ -99,6 +99,11 @@ def _perplexity_request(endpoint: str, payload: dict[str, Any], gateway=None) ->
         base_url, api_key, headers = gateway.gateway_origin.rstrip("/"), gateway.nous_user_token, {"User-Agent": headers["User-Agent"]}
     elif api_key:
         base_url = (get_provider_env("PERPLEXITY_BASE_URL") or _DEFAULT_BASE_URL).rstrip("/")
+        from hermes_cli.billing_wallet import web_company_secret
+
+        api_key = web_company_secret(backend="perplexity", company_secret=api_key, target_url=base_url)
+        if not api_key:
+            raise ValueError(_missing_key_error())
     else:
         raise ValueError(_missing_key_error())
     url = f"{base_url}/{endpoint.lstrip('/')}"

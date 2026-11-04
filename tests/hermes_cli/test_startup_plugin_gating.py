@@ -13,12 +13,104 @@ builds the plugin subparsers (issue #54678).
 
 from __future__ import annotations
 
+import io
+import re
 import sys
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
+import pytest
+
+from hermes_cli._parser import build_top_level_parser, top_level_value_flag_sets
 from hermes_cli.main import (
+    _BUILTIN_SUBCOMMANDS,
+    _first_positional_argv,
+    _plugin_cli_discovery_needed,
     _resolve_deferred_platform_cli_command,
 )
+
+
+# ── helper: grab the live set of top-level subcommands from argparse ───────
+
+
+def _live_subcommand_names() -> set[str]:
+    """Run ``hermes --help`` in-process and parse the subcommand block.
+
+    We patch ``_plugin_cli_discovery_needed`` to always return False so
+    plugin-registered commands aren't included — we're validating the
+    built-in-only set.
+    """
+    from hermes_cli import main as _main
+
+    argv_backup = sys.argv[:]
+    sys.argv = ["hermes", "--help"]
+    buf = io.StringIO()
+    try:
+        with patch.object(_main, "_plugin_cli_discovery_needed", return_value=False):
+            with redirect_stdout(buf):
+                with pytest.raises(SystemExit):
+                    _main.main()
+    finally:
+        sys.argv = argv_backup
+
+    text = buf.getvalue()
+    # argparse prints "{chat,model,...}" somewhere in the help output
+    m = re.search(r"\{([a-zA-Z0-9_,\-]+)\}", text)
+    assert m, f"Could not find subcommand group in --help output:\n{text[:500]}"
+    return set(m.group(1).split(","))
+
+
+# ── _first_positional_argv ─────────────────────────────────────────────────
+
+
+def test_value_flag_sets_match_top_level_parser():
+    required, optional = top_level_value_flag_sets()
+
+    for action in build_top_level_parser()[0]._actions:
+        if not action.option_strings or action.nargs == 0:
+            continue
+        expected = optional if action.nargs == "?" else required
+        assert set(action.option_strings) <= expected
+
+
+def test_reasoning_value_is_not_misclassified_as_subcommand(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["hermes", "--reasoning", "high", "chat", "hello"],
+    )
+
+    assert _first_positional_argv() == "chat"
+    assert _plugin_cli_discovery_needed() is False
+
+
+
+
+# ── _plugin_cli_discovery_needed ───────────────────────────────────────────
+
+
+# ── _BUILTIN_SUBCOMMANDS ↔ argparse registration parity ────────────────────
+
+
+def test_qenex_and_cursor_sdk_are_builtin_and_registered():
+    """Fork commands must stay on the argparse table AND the plugin-discovery
+    skip set; dropping either side after an upstream merge either slows every
+    ``hermes qenex`` / ``hermes cursor-sdk`` invocation or lets a plugin
+    shadow the name."""
+    from hermes_cli.config_defaults import DEFAULT_CONFIG, OPTIONAL_ENV_VARS
+    from hermes_cli.main import _build_cli_parser
+
+    sdk = DEFAULT_CONFIG.get("cursor_sdk")
+    assert isinstance(sdk, dict) and sdk.get("model")
+    assert "runtime" not in sdk
+    assert "CURSOR_API_KEY" in OPTIONAL_ENV_VARS
+
+    fork_cmds = ("qenex", "cursor-sdk")
+    for name in fork_cmds:
+        assert name in _BUILTIN_SUBCOMMANDS
+    _parser, subparsers = _build_cli_parser()
+    for name in fork_cmds:
+        assert name in subparsers.choices
 
 
 # ── _resolve_deferred_platform_cli_command (issue #54678) ──────────────────

@@ -96,13 +96,16 @@ from hermes_cli.old_updater_deps import (
 from hermes_cli.update_cmd_git import (
     OFFICIAL_REPO_URL, OFFICIAL_REPO_URLS, SKIP_UPSTREAM_PROMPT_FILE, _ORPHAN_RESCUE_REFS_TO_KEEP,
     _ORPHAN_RESCUE_REF_MAX_AGE_DAYS, _add_upstream_remote, _assess_parked_branch_switch,
-    _branch_head_label, _branch_head_suffix, _classify_fetch_failure, _count_commits_between,
-    _discard_lockfile_churn, _ensure_non_trampoline_git, _get_origin_url, _git_is_trampoline,
+    _branch_head_label, _branch_head_suffix, _candidate_origin_from_remotes, _classify_fetch_failure,
+    _count_commits_between, _discard_lockfile_churn, _ensure_non_trampoline_git, _ensure_origin_remote,
+    _fetch_origin_branch, _get_origin_url, _git_is_trampoline,
     _has_upstream_remote, _is_fork, _locate_real_git, _mark_skip_upstream_prompt,
     _normalize_managed_eol, _park_detached_head, _portable_git_candidates, _print_fetch_failure,
-    _print_parked_branch_kept_notice, _print_parked_branch_skip_warning,
-    _prune_orphan_rescue_refs, _push_synced_fork, _should_skip_upstream_prompt, _sync_fork_with_upstream,
-    _sync_with_upstream_if_needed, UpstreamTargetBroken)
+    _print_parked_branch_dirty_notice, _print_parked_branch_kept_notice,
+    _print_parked_branch_skip_warning,
+    _prune_orphan_rescue_refs, _push_synced_fork, _should_skip_upstream_prompt,
+    _stderr_is_missing_origin, _sync_fork_with_upstream, _sync_with_upstream_if_needed,
+    UpstreamTargetBroken)
 from hermes_cli.update_cmd_maint import (
     _PRE_UPDATE_SNAPSHOT_KEEP, _PRE_UPDATE_SNAPSHOT_MAX_FILE_SIZE,
     _checkout_version, _ensure_acp_launcher, _ensure_fhs_path_guard, _finish_dashboard_update_cleanup,
@@ -673,6 +676,17 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
         if branch is None:
             return
 
+    # Interrupted fetches leave .git/*.lock behind ("File exists" forever); self-heal first.
+    from hermes_cli.gitlock import clear_stale_git_locks, clear_stale_tmp_packs
+    for lock_path in clear_stale_git_locks(_m().PROJECT_ROOT):
+        print(f"  (removed stale git lock: {lock_path})")
+    # Aborted fetches also strand tmp_pack_* debris (has reached 6 GB and corrupted the
+    # pack dir); same age+process safety contract as the locks.
+    swept = clear_stale_tmp_packs(_m().PROJECT_ROOT)
+    if swept:
+        print(f"  (removed {len(swept)} aborted-fetch pack temp file(s))")
+
+    _m()._ensure_origin_remote(git_cmd, _m().PROJECT_ROOT)
     # Installer checkouts are shallow (`git clone --depth 1`). A plain fetch would unshallow
     # the repo (the exact cost the shallow clone avoided) and rev-list would then report a
     # huge bogus "behind" count, so fetch with --depth 1 and report presence-only.
@@ -1338,6 +1352,8 @@ class _CheckoutPlan:
     rollback_branch: str | None = None
     # The switch changed the running code with no new commits to count (commit_count == -1).
     switched_without_new_commits: bool = False
+    # QENEX delta: a dirty parked-branch stash is parked, never restored onto the target.
+    park_stash: bool = False
 
 
 def _apply_parked_branch_guard(
@@ -1348,7 +1364,8 @@ def _apply_parked_branch_guard(
 
     By branch contents + updates.parked_branch_strategy: fully merged -> switch back;
     unmerged -> "switch" (default; loud "kept" notice) or "update_in_place" (merge origin/<target>
-    INTO the branch, checkout never moves; --switch-branch overrides once); dirty/unverifiable ->
+    INTO the branch, checkout never moves; --switch-branch overrides once); dirty -> stash on
+    this branch, switch, park the stash (never restore onto the target); unverifiable/disabled ->
     touch nothing, warn, ``sys.exit(1)`` with the code update SKIPPED (also when the target is
     missing). Returns ``(parked_branch_switched, in_place_update, switch_block_reason)``.
     """
@@ -1357,6 +1374,9 @@ def _apply_parked_branch_guard(
     switch_safe, switch_block_reason = _m()._assess_parked_branch_switch(
         git_cmd, _m().PROJECT_ROOT, current_branch, branch)
     if not switch_safe:
+        if switch_block_reason == "dirty":
+            _m()._print_parked_branch_dirty_notice(current_branch, branch)
+            return True, False, switch_block_reason
         _m()._print_parked_branch_skip_warning(
             git_cmd, _m().PROJECT_ROOT, current_branch, branch, switch_block_reason)
         print()
@@ -1436,14 +1456,15 @@ def _prepare_checkout_for_update(
             _exit_after_failed_branch_switch(
                 git_cmd, branch, track_result, auto_stash_ref, gw_input_fn, _windows_gateway_resume)
 
-    prompt_for_restore = auto_stash_ref is not None and prompt_for_restore and not ask_first
+    park_stash = switch_block_reason == "dirty"
+    prompt_for_restore = auto_stash_ref is not None and prompt_for_restore and not ask_first and not park_stash
 
     if release_tag:
         # An ancestor release still needs applying when switching channels.
         head_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
         return _CheckoutPlan(
             auto_stash_ref=auto_stash_ref, commit_count=0 if head_sha == target_ref else -1,
-            in_place_update=True, parked_branch_switched=False,
+            in_place_update=True, parked_branch_switched=False, park_stash=False,
             prompt_for_restore=prompt_for_restore, switch_block_reason=None, upstream_checked=True)
 
     # On shallow checkouts `rev-list --count` can report the entire remote ancestry. The
@@ -1504,7 +1525,8 @@ def _prepare_checkout_for_update(
 
     return _CheckoutPlan(
         auto_stash_ref=auto_stash_ref, commit_count=commit_count, in_place_update=in_place_update,
-        parked_branch_switched=parked_branch_switched, prompt_for_restore=prompt_for_restore,
+        parked_branch_switched=parked_branch_switched, park_stash=park_stash,
+        prompt_for_restore=prompt_for_restore,
         switch_block_reason=switch_block_reason, upstream_checked=upstream_checked,
         pre_sync_sha=moved_from_sha, rollback_branch=rollback_branch,
         switched_without_new_commits=switched_without_new_commits)
@@ -1630,7 +1652,7 @@ def _prepare_git_command(*, checkout_move=None) -> tuple[bool, list, bool]:
     _discard_lockfile_churn(git_cmd, _m().PROJECT_ROOT, checkout_move=checkout_move)
     _normalize_managed_eol(git_cmd, _m().PROJECT_ROOT, checkout_move=checkout_move)
 
-    origin_url = _m()._get_origin_url(git_cmd, _m().PROJECT_ROOT)
+    origin_url = _m()._ensure_origin_remote(git_cmd, _m().PROJECT_ROOT)
     is_fork = _is_fork(origin_url)
 
     if is_fork:
@@ -1735,21 +1757,47 @@ def _finalize_receipt(status: str, debug_message: str) -> None:
         finalize_update_receipt(status)
 
 
+def _invalidate_update_cache():
+    """Delete the update-check cache for ALL profiles: the repo is shared, so one profile's
+    update makes every profile current and a stale "commits behind" banner would linger."""
+    from hermes_constants import get_default_hermes_root
+
+    default_home = get_default_hermes_root()
+    profiles_root = default_home / "profiles"
+    homes = [default_home]
+    if profiles_root.is_dir():
+        homes += [entry for entry in profiles_root.iterdir() if entry.is_dir()]
+    for home in homes:
+        with suppress(Exception):
+            (home / ".update_check").unlink(missing_ok=True)
+
+
 def _finish_already_up_to_date(
     git_cmd, branch: str, current_branch: str, _plan, *, gw_input_fn, completion_request: dict,
     _windows_gateway_resume=None, held_message: str | None = None) -> None:
     """"Already up to date" path: restore stash, repair the checkout, catch up the fleet.
     ``held_message`` replaces "Already up to date!" when the channel's release was held, not reached.
     ``sys.exit(1)`` when the repair is incomplete (after gateway exit code + partial receipt)."""
+    _invalidate_update_cache()
+
     # A parked branch the update switched off stays on the target: re-parking on the stale branch
     # recreates the incident. No other checkout left current_branch (in-place and release updates
     # never switch), so there is nothing to switch back to.
+    # Dirty parked stashes must stay parked too: restoring them onto the update target would
+    # ride uncommitted feature-branch edits onto main.
     if _plan.auto_stash_ref is not None:
-        _m()._restore_stashed_changes(
-            git_cmd, _m().PROJECT_ROOT, _plan.auto_stash_ref, prompt_user=_plan.prompt_for_restore,
-            input_fn=gw_input_fn, checkout_move=_moves_for(_windows_gateway_resume))
+        if _plan.park_stash:
+            _m()._park_stashed_changes(_plan.auto_stash_ref)
+        else:
+            _m()._restore_stashed_changes(
+                git_cmd, _m().PROJECT_ROOT, _plan.auto_stash_ref,
+                prompt_user=_plan.prompt_for_restore, input_fn=gw_input_fn, checkout_move=_moves_for(_windows_gateway_resume))
     if _plan.parked_branch_switched:
-        if _plan.switch_block_reason.startswith("unmerged:"):
+        if _plan.switch_block_reason == "dirty":
+            print(
+                f"  ✓ Checkout was parked on '{current_branch}' with uncommitted changes — "
+                f"stashed and switched to {branch}.")
+        elif (_plan.switch_block_reason or "").startswith("unmerged:"):
             _count = _plan.switch_block_reason.split(":", 1)[1]
             print(
                 f"  ✓ Checkout was parked on '{current_branch}' — switched back to {branch}; "
@@ -1973,10 +2021,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
             print("→ Updates available (commit count unknown on this shallow checkout)")
 
         print("→ Pulling updates...")
+        # Dirty parked-branch WIP is parked, never discarded: discard is for local
+        # edits on the update target, not uncommitted work left on a feature branch.
         movement_baseline = _pull_updates(
             git_cmd, branch, _plan.auto_stash_ref, prompt_for_restore=_plan.prompt_for_restore,
-            gw_input_fn=gw_input_fn, discard_local_changes=opts.discard_local_changes,
-            keep_stash=opts.keep_stash, target_ref=target_ref, pre_sync_sha=_plan.pre_sync_sha,
+            gw_input_fn=gw_input_fn,
+            discard_local_changes=opts.discard_local_changes and not _plan.park_stash,
+            keep_stash=opts.keep_stash or _plan.park_stash, target_ref=target_ref, pre_sync_sha=_plan.pre_sync_sha,
             rollback_branch=_plan.rollback_branch,
             sync_upstream=is_fork and branch == "main" and not release_sha, assume_yes=assume_yes,
             in_place_update=_plan.in_place_update, _windows_gateway_resume=_windows_gateway_resume,
