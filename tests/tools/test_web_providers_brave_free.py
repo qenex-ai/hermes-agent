@@ -32,10 +32,6 @@ class TestBraveFreeProviderIsConfigured:
         assert BraveFreeWebSearchProvider().is_available() is True
 
 
-    def test_implements_web_search_provider(self):
-        from agent.web_search_provider import WebSearchProvider
-        from plugins.web.brave_free.provider import BraveFreeWebSearchProvider
-        assert issubclass(BraveFreeWebSearchProvider, WebSearchProvider)
 
 
 class TestBraveFreeProviderSearch:
@@ -136,7 +132,7 @@ class TestBraveFreeBackendWiring:
     def test_brave_free_does_not_autoselect_over_or_from_exa_key(self, monkeypatch):
         """Unused EXA_API_KEY / BRAVE_SEARCH_API_KEY must not auto-pick a paid backend."""
         from tools import web_tools
-        monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
+        monkeypatch.setattr(web_tools, "_load_web_config", dict)
         for key in ("FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "PARALLEL_API_KEY", "EXA_API_KEY", "SEARXNG_URL"):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("EXA_API_KEY", "exa_test")

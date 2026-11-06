@@ -1,4 +1,4 @@
-"""Dependency install execution shared between early recovery and full recovery.
+"""Dependency install execution shared between early recovery and full recovery, plus Windows launcher and PATH repair.
 
 Both callers need to run the same core ``.[all]`` reinstall:
 
@@ -24,7 +24,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -33,6 +32,10 @@ from pathlib import Path
 # Single source of truth for the recovery-lock lifecycle and uv lookup —
 # _early_recovery already owns both, and importing it is free (stdlib-only).
 from hermes_cli import _early_recovery as _er
+
+def _sync_windows_cli_launchers(root: Path) -> list[Path]:
+    # Shim to stop the old updater doing work until relaunch. Copy no launchers.
+    return []
 
 
 _INDEX_UNREACHABLE_NOTICE = (
@@ -212,8 +215,8 @@ def _venv_scripts_dir(root: Path) -> Path | None:
 
 #: Launcher command names install.ps1's Set-PathVariable exposes from the
 #: managed binary dir (the default Hermes root's ``bin``, next to uv.exe)
-#: on the user PATH. Keep in lockstep with the launcher list in
-#: scripts/install.ps1.
+#: on the user PATH. Keep in lockstep with WINDOWS_BIN_LAUNCHERS in
+#: hermes_cli/_launchers.py and scripts/install.ps1.
 _WINDOWS_BIN_LAUNCHERS = ("hermes", "hermes-acp")
 
 
@@ -277,11 +280,15 @@ def ensure_windows_bin_launchers(
     windows: bool | None = None,
     user_path_entries: list[str] | None = None,
 ) -> list[str]:
-    """Re-stage the Windows ``hermes`` launchers when they vanish.
+    """Re-stage the Windows ``hermes`` launchers when they vanish or when
+    they still boot through the venv.
 
-    On Windows, ``hermes`` resolves through launchers derived from the venv
-    console scripts — never ``venv\\Scripts`` itself on PATH, which would
-    shadow the user's ``python`` (#83797). The canonical launcher home is
+    On Windows, ``hermes`` resolves through staged launchers — never
+    ``venv\\Scripts`` itself on PATH, which would shadow the user's
+    ``python`` (#83797) — and under pm the launchers boot the pm STORE
+    python with ``PYTHONPATH=<repo>;<venv>/site-packages``, never the venv
+    interpreter (no-boot-through-venv; ``pyvenv.cfg`` is inert dead
+    config). The canonical launcher home is
     the managed binary dir — the default Hermes root's ``bin``
     (``%LOCALAPPDATA%\\hermes\\bin``, next to the managed uv) — which lives
     OUTSIDE the git checkout so no git operation can ever touch it. It is
@@ -297,15 +304,10 @@ def ensure_windows_bin_launchers(
     terminal. That legacy location is re-staged too, during the transition,
     for installs whose user PATH still resolves through it.
 
-    The launcher FORM depends on the venv (see :func:`_venv_is_relocatable`):
-    a normal venv's exe trampoline embeds an absolute interpreter path and
-    survives copying, so it is copied as ``<name>.exe``; a relocatable
-    venv's trampoline resolves relative to its own location and a copy
-    dies with ``uv trampoline failed to canonicalize script path``, so a
-    ``<name>.cmd`` delegator invoking the in-venv exe by absolute path is
-    written instead. A name counts as present when EITHER form exists —
-    exe copies staged before a venv rebuild keep working (they embed the
-    swapped-in-place venv's absolute path) and are left alone.
+    A name counts as present when an exe exists that does NOT boot the
+    venv interpreter — legacy copied-venv trampolines (detected by their
+    embedded interpreter path) and placeholder .cmd delegators are replaced
+    with a store-python launcher as soon as one can be minted.
 
     Two targets, two gates, both failing toward inaction:
 
@@ -343,14 +345,47 @@ def ensure_windows_bin_launchers(
     def _launcher_present(target: Path, name: str) -> bool:
         return (target / f"{name}.exe").exists() or (target / f"{name}.cmd").exists()
 
+    # Only the launch producer knows the executable/boot contract. Old venv
+    # paths below identify obsolete artifacts; they never select dependencies.
+    from hermes_cli._launchers import (
+        ensure_install_launchers,
+        exe_is_venv_bound,
+        stage_launcher,
+    )
+
+    from hermes_constants import project_venv_dir
+
+    venv_dir = project_venv_dir(root)
+
+    def _needs_attention(target: Path, name: str) -> bool:
+        """Missing, a placeholder .cmd, or a launcher that still boots the
+        venv interpreter — anything the store-python launcher should replace."""
+        exe = target / f"{name}.exe"
+        if not exe.exists():
+            return not ((target / f"{name}.cmd").is_file()
+                        and _launcher_present(root / ".hermes" / "bin", name))
+        return exe_is_venv_bound(exe, venv_dir)
+
     targets: list[Path] = []
+    restored: list[str] = []
 
     # Canonical target — gate on the managed-clone shape. This runs at
     # every hermes_cli.main process start (right after the profile
     # override), so the healthy path must stay at a couple of stat calls.
     if _normalize_windows_path(root.parent) == _normalize_windows_path(home):
         canonical = home / "bin"
-        if any(not _launcher_present(canonical, name) for name in _WINDOWS_BIN_LAUNCHERS):
+        local = root / ".hermes" / "bin"
+        if any(not _launcher_present(local, name) for name in _WINDOWS_BIN_LAUNCHERS):
+            # Upgrade existing PM installs too: their healthy external launcher
+            # predates the exact-install command and may lack the runtime query.
+            try:
+                canonical.mkdir(parents=True, exist_ok=True)
+                restored.extend(ensure_install_launchers(root, canonical))
+            except OSError:
+                return []
+        if not restored and any(
+            _needs_attention(canonical, name) for name in _WINDOWS_BIN_LAUNCHERS
+        ):
             targets.append(canonical)
 
     # Legacy transition target — the pre-migration in-checkout dir. Only
@@ -360,7 +395,7 @@ def ensure_windows_bin_launchers(
     # network shares. An entry stored some other way (8.3 short path,
     # subst drive) misses the re-stage, which fails safe: no-op.
     legacy = root / "bin"
-    if any(not _launcher_present(legacy, name) for name in _WINDOWS_BIN_LAUNCHERS):
+    if any(_needs_attention(legacy, name) for name in _WINDOWS_BIN_LAUNCHERS):
         if user_path_entries is None:
             user_path_entries = _windows_user_path_entries()
         configured = {_normalize_windows_path(entry) for entry in user_path_entries}
@@ -368,46 +403,26 @@ def ensure_windows_bin_launchers(
             targets.append(legacy)
 
     if not targets:
-        return []
+        return restored
 
-    from hermes_constants import project_venv_dir, venv_bin_dir
-
-    venv_dir = project_venv_dir(root)
-    if venv_dir is None:
-        return []
-    scripts_dir = venv_bin_dir(venv_dir, windows=windows)
-    sources = [
-        (name, scripts_dir / f"{name}.exe")
-        for name in _WINDOWS_BIN_LAUNCHERS
-        if (scripts_dir / f"{name}.exe").is_file()
-    ]
-    if not sources:
-        return []
-    relocatable = _venv_is_relocatable(venv_dir)
-
-    restored: list[str] = []
     for target in targets:
         try:
             target.mkdir(parents=True, exist_ok=True)
         except OSError:
             continue
-        for name, source in sources:
-            if _launcher_present(target, name):
+        for name in _WINDOWS_BIN_LAUNCHERS:
+            if not _needs_attention(target, name):
+                # Already a store-python launcher (or a form this heal does
+                # not understand but that does not boot the venv): leave it.
                 continue
-            final = target / (f"{name}.cmd" if relocatable else f"{name}.exe")
-            staging = target / f"{final.name}.heal.{os.getpid()}"
-            try:
-                if relocatable:
-                    staging.write_text(
-                        "@echo off\r\n" f'"{source}" %*\r\n', encoding="ascii"
-                    )
-                else:
-                    shutil.copy2(source, staging)
-                os.replace(staging, final)
+            final = stage_launcher(name, root, target)
+            if final is not None:
+                # Windows resolves .exe before .cmd. A surviving venv-bound
+                # launcher would shadow the successfully staged fallback.
+                obsolete = target / f"{name}.exe"
+                if final.suffix == ".cmd" and exe_is_venv_bound(obsolete, venv_dir):
+                    obsolete.unlink()
                 restored.append(str(final))
-            except OSError:
-                with contextlib.suppress(OSError):
-                    staging.unlink()
     if restored:
         # Guarded like everything else in this never-raises helper: a
         # closed/broken stderr must not turn a successful heal into a crash.
@@ -463,7 +478,8 @@ def migrate_windows_bin_path(
     2. verify both launchers are present there — otherwise STOP, leaving
        the user PATH untouched (never strip a working entry before its
        replacement is proven);
-    3. ensure the managed binary dir is on the user PATH (prepend);
+    3. ensure the managed binary dir is on the user PATH (prepend), only
+       when new consoles resolve this home (``_launchers.owns_user_path``);
     4. strip the legacy entries: ``<root>\\bin`` (in-checkout launcher dir
        the update autostash could sweep) and ``<root>\\venv\\Scripts``
        (shadowed the user's ``python``, #83797).
@@ -487,7 +503,8 @@ def migrate_windows_bin_path(
     root = Path(root)
 
     # Same per-machine anchor as ensure_windows_bin_launchers (see there).
-    from hermes_constants import get_default_hermes_root, venv_bin_dir
+    from hermes_constants import get_default_hermes_root
+    from pm.environments import venv_bin_dir
 
     try:
         home = Path(get_default_hermes_root())
@@ -504,6 +521,14 @@ def migrate_windows_bin_path(
         for name in _WINDOWS_BIN_LAUNCHERS
     ):
         return False  # staging incomplete — leave the PATH alone
+
+    try:
+        from hermes_cli._launchers import owns_user_path
+
+        if not owns_user_path(home):
+            return False  # new consoles resolve another home; leave the User PATH to it
+    except (ImportError, OSError, ValueError):  # an old updater's _launchers, or a failed Win32 call
+        return False
 
     if read_user_path is None:
         read_user_path = _read_user_path_raw
