@@ -269,7 +269,10 @@ async def _serve_bearer(request: Request, call_next: Callable[[Request], Awaitab
     if not webapp_sign_in.access_token_works_alone(request, bearer):
         return _unauth_response(request, reason="invalid_or_expired_session")
     try:
-        bearer_session = _verify_access_token(request, access_token=bearer, audit=False)
+        # verify_session() does blocking JWKS I/O; keep it off the event loop
+        # (same reason refresh already uses run_in_threadpool).
+        bearer_session = await run_in_threadpool(
+            _verify_access_token, request, access_token=bearer, audit=False)
     except ProviderError as e:
         return unreachable_response(str(e))
     if bearer_session is not None:
@@ -335,7 +338,8 @@ async def gated_auth_middleware(
     session = None
     if at:
         try:
-            session = _verify_access_token(request, access_token=at, provider_hint=provider_hint)
+            session = await run_in_threadpool(
+                _verify_access_token, request, access_token=at, provider_hint=provider_hint)
         except ProviderError as e:
             return unreachable_response(str(e))
     if session is None:

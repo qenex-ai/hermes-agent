@@ -30,6 +30,8 @@ The agent processes the event and can respond by posting comments on PRs, sendin
 2. Define routes in `config.yaml` **or** create them dynamically with `hermes webhook subscribe`
 3. Point your service at `http://your-server:8644/webhooks/<route-name>`
 
+Bare `POST /webhooks` (no route segment) aliases to `main`, or `platforms.webhook.extra.default_route` if set, or the sole configured route. HMAC validation is unchanged.
+
 ---
 
 ## Setup
