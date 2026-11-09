@@ -22,8 +22,8 @@ Two invariants shape almost every design decision and are the lens for reviewing
   multiplies the user's cost; the ONE exception is context compression. Slash commands that change
   system-prompt state defer to the next session, with an opt-in `--now` (`/skills install --now`).
 - **The core is a narrow waist; capability lives at the edges.** Every model tool is sent on
-  every API call, so the bar for a new *core* tool is high. New capability should arrive as a
-  CLI command + skill, a service-gated tool, or a plugin — not as core surface.
+  every API call, so the bar for a new *core* tool is high — capability arrives per the
+  footprint ladder below.
 
 ## Contribution rubric
 
@@ -151,23 +151,23 @@ Every former god file is a **facade** (public entry points + the names other pac
 
 ## Routing Table — working in X → read X/AGENTS.md
 
-| Area | Read | Covers |
-|---|---|---|
-| `run_agent.py`, `agent/` | `agent/AGENTS.md` | turn phases, caching and message-flow invariants, compression, model/aux resolution |
-| `cli.py`, `hermes_cli/` | `hermes_cli/AGENTS.md` | CLI mixins, slash registry, config system, skins, `hermes update`, profiles / multiplex |
-| `gateway/` | `gateway/AGENTS.md` | adapters, message guards, streaming, notifications, token locks, § Profile scope |
-| `gateway/platforms/` new adapter | `gateway/platforms/ADDING_A_PLATFORM.md` | step-by-step adapter guide |
-| `tools/`, `toolsets.py`, `model_tools.py` | `tools/AGENTS.md` | adding tools, registry, toolsets, delegation, session-scoped surface tools |
-| `plugins/`, `hermes_cli/plugins*.py` | `plugins/AGENTS.md` | plugin kinds, native compat contract, in-tree policy |
-| `plugin-catalog/` | `plugin-catalog/README.md` | catalog admission rules (mirrored in the developer guide; keep identical) |
-| `tui_gateway/`, `ui-tui/` | `tui_gateway/AGENTS.md` | process model, JSON-RPC transport, slash flow |
-| `web/`, `hermes_cli/web_routers/` | `web/AGENTS.md` | dashboard embeds the real TUI |
-| `apps/desktop/` | `apps/desktop/AGENTS.md`, `apps/desktop/src/AGENTS.md` | `serve` backend, slash palette, Bot Mode |
-| `skills/`, `optional-skills/`, `agent/curator*.py` | `skills/AGENTS.md` | frontmatter, authoring standards, curator |
-| `cron/`, kanban | `cron/AGENTS.md` | scheduler invariants, job fields, kanban dispatcher |
-| `tests/` | `tests/AGENTS.md` | runner, placement, OS markers, `wine2e`, banned test shapes |
-| `pm/`, `pyproject.toml` | `pm/AGENTS.md` | pinning policy, PM-owned environments, plugin quarantine |
-| `hermes_platform/` | `hermes_platform/AGENTS.md` | host facts, resolvers |
+| Area | Read |
+|---|---|
+| `run_agent.py`, `agent/` | `agent/AGENTS.md` |
+| `cli.py`, `hermes_cli/` | `hermes_cli/AGENTS.md` |
+| `gateway/` | `gateway/AGENTS.md` |
+| `gateway/platforms/` new adapter | `gateway/platforms/ADDING_A_PLATFORM.md` |
+| `tools/`, `toolsets.py`, `model_tools.py` | `tools/AGENTS.md` |
+| `plugins/`, `hermes_cli/plugins*.py` | `plugins/AGENTS.md` |
+| `plugin-catalog/` | `plugin-catalog/README.md` |
+| `tui_gateway/`, `ui-tui/` | `tui_gateway/AGENTS.md` |
+| `web/`, `hermes_cli/web_routers/` | `web/AGENTS.md` |
+| `apps/desktop/` | `apps/desktop/AGENTS.md`, `apps/desktop/src/AGENTS.md` |
+| `skills/`, `optional-skills/`, `agent/curator*.py` | `skills/AGENTS.md` |
+| `cron/`, kanban | `cron/AGENTS.md` |
+| `tests/` | `tests/AGENTS.md` |
+| `pm/`, `pyproject.toml` | `pm/AGENTS.md` |
+| `hermes_platform/` | `hermes_platform/AGENTS.md` |
 
 Long-form background: `website/docs/developer-guide/`. Workflow rules (PR/issue/review/salvage
 process) live in the `hermes-agent-dev` skill, not here.
