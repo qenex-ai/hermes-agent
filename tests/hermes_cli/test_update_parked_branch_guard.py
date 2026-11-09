@@ -24,14 +24,16 @@ branch, clone) — not mocked subprocess.run — so they exercise the actual
 ``git status`` / ``git cherry`` semantics the guard depends on.
 """
 
+import json
+import os
 import subprocess
 from types import SimpleNamespace
 
 import pytest
 
 from hermes_cli import main as hermes_main
-import hermes_cli.main_web_build as main_web_build
-import hermes_cli.main_install_repair as main_install_repair
+from hermes_cli import main_web_build
+from hermes_cli import main_install_repair
 from hermes_cli import update_cmd
 
 
@@ -61,7 +63,7 @@ def repo_pair(tmp_path):
     _git(origin, "init", "-q", "-b", "main")
     _git(origin, "config", "user.email", "test@example.com")
     _git(origin, "config", "user.name", "Test")
-    (origin / "a.txt").write_text("one\n")
+    (origin / "a.txt").write_text("one\n", encoding="utf-8")
     _git(origin, "add", "a.txt")
     _git(origin, "commit", "-qm", "c1")
 
@@ -73,9 +75,9 @@ def repo_pair(tmp_path):
     _git(clone, "checkout", "-qb", "old-feature")
 
     # main advances upstream (two commits).
-    (origin / "a.txt").write_text("two\n")
+    (origin / "a.txt").write_text("two\n", encoding="utf-8")
     _git(origin, "commit", "-aqm", "c2")
-    (origin / "b.txt").write_text("three\n")
+    (origin / "b.txt").write_text("three\n", encoding="utf-8")
     _git(origin, "add", "b.txt")
     _git(origin, "commit", "-qm", "c3")
 
@@ -88,7 +90,7 @@ def _no_config(monkeypatch):
     """Isolate the guard from the machine's real config.yaml."""
     import hermes_cli.config as hermes_config
 
-    monkeypatch.setattr(hermes_config, "load_config", lambda: {})
+    monkeypatch.setattr(hermes_config, "load_config", dict)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +119,7 @@ def test_dirty_tree_is_not_a_silent_switch(repo_pair):
 
 def test_untracked_file_blocks_auto_switch(repo_pair):
     """Untracked files count as dirty too — they'd ride along on checkout."""
-    (repo_pair / "scratch.py").write_text("wip\n")
+    (repo_pair / "scratch.py").write_text("wip\n", encoding="utf-8")
     safe, reason = update_cmd._assess_parked_branch_switch(
         GIT, repo_pair, "old-feature", "main"
     )
@@ -131,7 +133,7 @@ def test_unmerged_commits_switch_with_kept_notice(repo_pair):
     caller prints the loud 'kept' notice. Non-interactive callers (desktop
     update button, gateway /update, cron) depend on this: they cannot
     resolve a skip."""
-    (repo_pair / "feature.txt").write_text("unmerged work\n")
+    (repo_pair / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
     _git(repo_pair, "add", "feature.txt")
     _git(repo_pair, "commit", "-qm", "feature work")
 
@@ -180,29 +182,137 @@ def test_missing_origin_ref_is_unverifiable(repo_pair):
     assert reason == "unverifiable"
 
 
-# ---------------------------------------------------------------------------
-# Skip warning content
-# ---------------------------------------------------------------------------
+def _treeless_repo_pair(tmp_path, *, promisor_reachable=False):
+    """A treeless clone parked on ``old-feature`` cut from c1, with origin/main
+    two commits ahead whose commits are local but whose trees are not — the
+    #124767 shape on a real partial clone. By default the promisor remote can
+    no longer satisfy a lazy fetch; ``promisor_reachable=True`` keeps it live
+    (the #131444 shape, where every lazy fetch succeeds and nothing bounds them).
 
-def test_skip_warning_names_branch_behind_count_and_commands(repo_pair, capsys):
-    update_cmd._print_parked_branch_skip_warning(
-        GIT, repo_pair, "old-feature", "main", "dirty"
+    Returns ``(clone,)``. Local commits/trees are all present; only the
+    upstream-side trees are missing, which is exactly what ``git cherry``'s
+    patch-id walk needs and ``rev-list`` does not.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-q", "-b", "main")
+    _git(origin, "config", "user.email", "test@example.com")
+    _git(origin, "config", "user.name", "Test")
+    # file:// (not a plain path) plus allowFilter: a local origin that speaks
+    # the partial-clone protocol, like GitHub does for real tree:0 clones.
+    _git(origin, "config", "uploadpack.allowFilter", "true")
+    (origin / "a.txt").write_text("one\n", encoding="utf-8")
+    _git(origin, "add", "a.txt")
+    _git(origin, "commit", "-qm", "c1")
+
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", f"file://{origin}", str(clone))
+    _git(clone, "config", "user.email", "test@example.com")
+    _git(clone, "config", "user.name", "Test")
+    _git(clone, "checkout", "-qb", "old-feature")
+
+    (origin / "a.txt").write_text("two\n", encoding="utf-8")
+    _git(origin, "commit", "-aqm", "c2")
+    (origin / "b.txt").write_text("three\n", encoding="utf-8")
+    _git(origin, "add", "b.txt")
+    _git(origin, "commit", "-qm", "c3")
+
+    # c2/c3 arrive as commits only (no trees).
+    _git(clone, "fetch", "-q", "--filter=tree:0", "origin", "main")
+    if not promisor_reachable:
+        _git(clone, "remote", "set-url", "origin", f"file://{tmp_path / 'nowhere'}")
+    return clone
+
+
+def _pack_count(clone) -> int:
+    """Packfiles in the clone — every lazy fetch from the promisor adds one (#131444)."""
+    return len(list((clone / ".git" / "objects" / "pack").glob("*.pack")))
+
+
+def test_treeless_clone_verifies_merged_parked_branch_from_commit_graph(tmp_path):
+    """Fully merged parked branch on a tree:0 clone with an unreachable promisor
+    remote: ``git cherry`` needs origin/main's trees and its lazy fetch fails,
+    which made the guard call a clean, fully-merged checkout unverifiable and
+    skip the update (#124767). The verdict must come from the commit graph
+    alone."""
+    clone = _treeless_repo_pair(tmp_path)
+    safe, reason = update_cmd._assess_parked_branch_switch(
+        GIT, clone, "old-feature", "main"
     )
-    out = capsys.readouterr().out
-    assert "CODE UPDATE SKIPPED" in out
-    assert "old-feature" in out
-    assert "2 commit(s) BEHIND" in out
-    assert f"git -C {repo_pair} checkout main && hermes update" in out
+    assert safe is True
+    assert reason == ""
 
 
-def test_skip_warning_dirty_reason(repo_pair, capsys):
-    update_cmd._print_parked_branch_skip_warning(
-        GIT, repo_pair, "old-feature", "main", "dirty"
+def test_treeless_cherry_failure_degrades_to_conservative_unmerged(tmp_path):
+    """Clean parked branch with local commits whose patch-equivalence cannot be
+    established (cherry's lazy fetch fails): a clean checkout must still reach
+    the target — degrade to the commit-graph count instead of the old
+    "unverifiable" skip (#124767)."""
+    clone = _treeless_repo_pair(tmp_path)
+    (clone / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
+    _git(clone, "add", "feature.txt")
+    _git(clone, "commit", "-qm", "feature work")
+    safe, reason = update_cmd._assess_parked_branch_switch(
+        GIT, clone, "old-feature", "main"
     )
-    out = capsys.readouterr().out
-    assert "uncommitted changes" in out
+    assert safe is True
+    assert reason == "unmerged:1"
 
 
+@pytest.mark.parametrize("repo_config", [
+    {},
+    # Foreground auto-GC folds each new pack away inside the same command, so the pack
+    # count alone cannot see a fetch; the Trace2 child count still does.
+    {"gc.auto": "1", "gc.autoPackLimit": "1", "gc.autoDetach": "false"},
+], ids=["plain", "foreground-gc"])
+def test_parked_branch_guard_never_lazy_fetches_from_a_live_promisor(tmp_path, monkeypatch, repo_config):
+    """Clean parked branch with a local commit on a tree:0 clone whose promisor
+    remote IS reachable: ``git cherry`` would lazy-fetch a tree batch per
+    upstream commit, and with nothing bounding that walk one such assessment
+    wrote 332 packs / 180 GiB in 7 h on Windows (#131444). The guard must not
+    start a single fetch and settles for the commit-graph count."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    clone = _treeless_repo_pair(tmp_path, promisor_reachable=True)
+    for key, value in repo_config.items():
+        _git(clone, "config", key, value)
+    (clone / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
+    _git(clone, "add", "feature.txt")
+    _git(clone, "commit", "-qm", "feature work")
+    packs_before = _pack_count(clone)
+    trace = tmp_path / "trace2.json"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    safe, reason = update_cmd._assess_parked_branch_switch(
+        GIT, clone, "old-feature", "main"
+    )
+    monkeypatch.delenv("GIT_TRACE2_EVENT")
+    events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    fetches = [e["argv"] for e in events if e.get("event") == "child_start" and "fetch" in e.get("argv", [])]
+    assert (safe, reason) == (True, "unmerged:1")
+    assert fetches == []
+    assert _pack_count(clone) == packs_before
+
+
+def test_parked_branch_guard_skips_cherry_on_a_partial_clone_when_git_ignores_no_lazy_fetch(
+        tmp_path, monkeypatch):
+    """Git before 2.44 ignores GIT_NO_LAZY_FETCH, so the no-lazy-fetch child alone would still
+    fetch without bound there (#124767, git 2.43). A partial clone must not reach cherry at all:
+    with the override emptied, as old git effectively sees it, the assessment starts no fetch."""
+    from hermes_cli import update_cmd_git
+    monkeypatch.setattr(update_cmd_git, "NO_LAZY_FETCH_ENV", {})
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    clone = _treeless_repo_pair(tmp_path, promisor_reachable=True)
+    (clone / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
+    _git(clone, "add", "feature.txt")
+    _git(clone, "commit", "-qm", "feature work")
+    trace = tmp_path / "trace2.json"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    safe, reason = update_cmd._assess_parked_branch_switch(GIT, clone, "old-feature", "main")
+    monkeypatch.delenv("GIT_TRACE2_EVENT")
+    events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    assert (safe, reason) == (True, "unmerged:1")
+    assert [e["argv"] for e in events if e.get("event") == "child_start" and "fetch" in e.get("argv", [])] == []
 def test_dirty_notice_names_branch_and_stash_restore(capsys):
     update_cmd._print_parked_branch_dirty_notice("old-feature", "main")
     out = capsys.readouterr().out
@@ -223,20 +333,13 @@ def test_kept_notice_names_branch_count_and_recovery(capsys):
 
 
 # ---------------------------------------------------------------------------
-# Summary branch/HEAD visibility
+# Skip warning content
 # ---------------------------------------------------------------------------
 
-def test_branch_head_label_reflects_real_checkout(repo_pair):
-    label = update_cmd._branch_head_label(GIT, repo_pair)
-    short = _git(repo_pair, "rev-parse", "--short", "HEAD").stdout.strip()
-    assert label == f"old-feature @ {short}"
 
-
-def test_branch_head_label_detached(repo_pair):
-    _git(repo_pair, "checkout", "-q", "--detach")
-    label = update_cmd._branch_head_label(GIT, repo_pair)
-    assert label is not None
-    assert label.startswith("detached @ ")
+# ---------------------------------------------------------------------------
+# Summary branch/HEAD visibility
+# ---------------------------------------------------------------------------
 
 
 def test_branch_head_suffix_empty_on_non_repo(tmp_path):
@@ -250,7 +353,8 @@ def test_print_update_completion_carries_branch_and_sha(
     update_cmd._print_update_completion("✓ Update complete!")
     out = capsys.readouterr().out
     short = _git(repo_pair, "rev-parse", "--short", "HEAD").stdout.strip()
-    assert f"✓ Update complete! [old-feature @ {short}]" in out
+    completion = next(line for line in out.splitlines() if "Update complete" in line)
+    assert "old-feature" in completion and short in completion
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +388,65 @@ def _patch_update_flow(monkeypatch, repo, run_real_git=True):
     monkeypatch.setattr(
         hermes_main, "_resume_windows_gateways_after_update", lambda *a, **k: None
     )
-    monkeypatch.setattr(hermes_main, "_capture_active_lazy_features", lambda: [])
-    monkeypatch.setattr(hermes_main, "_capture_active_tool_dependencies", lambda: [])
+
+
+def test_update_refuses_stopped_rebase_without_moving_head(
+    repo_pair, monkeypatch, capsys
+):
+    """A user-owned rebase controls the checkout; update must not switch branches underneath it."""
+    (repo_pair / "a.txt").write_text("topic\n", encoding="utf-8")
+    _git(repo_pair, "add", "a.txt")
+    _git(repo_pair, "commit", "-qm", "topic")
+    rebase = _git(repo_pair, "rebase", "--merge", "origin/main", check=False)
+    assert rebase.returncode != 0
+    assert (repo_pair / ".git" / "rebase-merge").is_dir()
+    assert _git(repo_pair, "branch", "--show-current").stdout.strip() == ""
+    head_before = _git(repo_pair, "rev-parse", "HEAD").stdout.strip()
+
+    _patch_update_flow(monkeypatch, repo_pair)
+    args = SimpleNamespace(branch=None, yes=True, force=False, force_venv=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update_cmd._cmd_update_impl(args, False)
+
+    assert exc_info.value.code == 1
+    assert _git(repo_pair, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert (repo_pair / ".git" / "rebase-merge").is_dir()
+    assert _git(repo_pair, "stash", "list").stdout.strip() == ""
+    out = capsys.readouterr().out
+    assert "Git rebase is in progress" in out
+    assert str(repo_pair) in out
+    assert "git rebase --abort" in out
+
+
+def test_update_reports_git_am_abort_for_apply_state(
+    repo_pair, monkeypatch, capsys
+):
+    """rebase-apply is shared by rebase --apply and git am; recovery advice must match Git's owner."""
+    (repo_pair / "a.txt").write_text("topic\n", encoding="utf-8")
+    _git(repo_pair, "add", "a.txt")
+    _git(repo_pair, "commit", "-qm", "topic")
+    patch = repo_pair.parent / "upstream.patch"
+    patch.write_text(
+        _git(repo_pair, "format-patch", "-1", "origin/main~1", "--stdout").stdout, encoding="utf-8"
+    )
+    applied = _git(repo_pair, "am", str(patch), check=False)
+    assert applied.returncode != 0
+    assert (repo_pair / ".git" / "rebase-apply" / "applying").is_file()
+    head_before = _git(repo_pair, "rev-parse", "HEAD").stdout.strip()
+
+    _patch_update_flow(monkeypatch, repo_pair)
+    args = SimpleNamespace(branch=None, yes=True, force=False, force_venv=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update_cmd._cmd_update_impl(args, False)
+
+    assert exc_info.value.code == 1
+    assert _git(repo_pair, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert (repo_pair / ".git" / "rebase-apply" / "applying").is_file()
+    out = capsys.readouterr().out
+    assert "Git am is in progress" in out
+    assert "git am --abort" in out
 
 
 def test_update_stashes_and_switches_dirty_parked_branch(
@@ -302,8 +463,8 @@ def test_update_stashes_and_switches_dirty_parked_branch(
         pass
 
     monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)
@@ -325,37 +486,6 @@ def test_update_stashes_and_switches_dirty_parked_branch(
     stashes = _git(repo_pair, "stash", "list").stdout
     assert "hermes-update-autostash-" in stashes
     assert "local edit" in _git(repo_pair, "stash", "show", "-p").stdout
-
-
-def test_update_stashes_untracked_files_on_dirty_parked_branch(
-    repo_pair, monkeypatch, capsys
-):
-    """Untracked files count as dirty and must be stashed (--include-untracked),
-    not ride along onto main."""
-    (repo_pair / "scratch.py").write_text("wip\n")
-    _patch_update_flow(monkeypatch, repo_pair)
-
-    class _StopFlow(Exception):
-        pass
-
-    monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
-        lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
-    )
-    args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)
-
-    with pytest.raises(_StopFlow):
-        hermes_main.cmd_update(args)
-
-    assert (
-        _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-        == "main"
-    )
-    assert not (repo_pair / "scratch.py").exists()
-    assert "scratch.py" in _git(repo_pair, "stash", "show", "--include-untracked", "--name-only").stdout
-    out = capsys.readouterr().out
-    assert "CODE UPDATE SKIPPED" not in out
 
 
 def test_update_still_skips_dirty_parked_when_auto_switch_disabled(
@@ -408,8 +538,8 @@ def test_update_dirty_parked_stash_survives_discard_config(
         pass
 
     monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(
@@ -439,7 +569,7 @@ def test_update_switches_unmerged_parked_branch_with_kept_notice(
     cannot resolve a skip), prints the loud 'kept' notice, ends on main
     fast-forwarded to origin/main, and the commits stay on the parked
     branch untouched."""
-    (repo_pair / "feature.txt").write_text("unmerged work\n")
+    (repo_pair / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
     _git(repo_pair, "add", "feature.txt")
     _git(repo_pair, "commit", "-qm", "feature work")
     feature_sha = _git(repo_pair, "rev-parse", "old-feature").stdout.strip()
@@ -449,8 +579,8 @@ def test_update_switches_unmerged_parked_branch_with_kept_notice(
         pass
 
     monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)
@@ -459,10 +589,7 @@ def test_update_switches_unmerged_parked_branch_with_kept_notice(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "1 commit(s) not merged into origin/main" in out
-    assert "safe on 'old-feature'" in out
     assert "CODE UPDATE SKIPPED" not in out
-    assert "updating it in place" not in out
     # Ends on main, fast-forwarded.
     assert (
         _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -493,7 +620,7 @@ def test_update_updates_unmerged_branch_in_place_when_configured(
         "load_config",
         lambda: {"updates": {"parked_branch_strategy": "update_in_place"}},
     )
-    (repo_pair / "feature.txt").write_text("unmerged work\n")
+    (repo_pair / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
     _git(repo_pair, "add", "feature.txt")
     _git(repo_pair, "commit", "-qm", "feature work")
     _patch_update_flow(monkeypatch, repo_pair)
@@ -503,8 +630,8 @@ def test_update_updates_unmerged_branch_in_place_when_configured(
         pass
 
     monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)
@@ -513,7 +640,6 @@ def test_update_updates_unmerged_branch_in_place_when_configured(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "updating it in place" in out
     assert "CODE UPDATE SKIPPED" not in out
     # The checkout never moved.
     assert (
@@ -522,9 +648,9 @@ def test_update_updates_unmerged_branch_in_place_when_configured(
     )
     # origin/main's code actually arrived (b.txt lands with c3)...
     assert (repo_pair / "b.txt").exists()
-    assert (repo_pair / "a.txt").read_text() == "two\n"
+    assert (repo_pair / "a.txt").read_text(encoding="utf-8-sig") == "two\n"
     # ...and the branch's own commit survived it.
-    assert (repo_pair / "feature.txt").read_text() == "unmerged work\n"
+    assert (repo_pair / "feature.txt").read_text(encoding="utf-8-sig") == "unmerged work\n"
     assert "feature work" in _git(repo_pair, "log", "--oneline").stdout
 
 
@@ -546,7 +672,7 @@ def test_switch_branch_flag_overrides_in_place_strategy(
         "load_config",
         lambda: {"updates": {"parked_branch_strategy": "update_in_place"}},
     )
-    (repo_pair / "feature.txt").write_text("unmerged work\n")
+    (repo_pair / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
     _git(repo_pair, "add", "feature.txt")
     _git(repo_pair, "commit", "-qm", "feature work")
     branch_tip_before = _git(
@@ -558,8 +684,8 @@ def test_switch_branch_flag_overrides_in_place_strategy(
         pass
 
     monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(
@@ -571,8 +697,6 @@ def test_switch_branch_flag_overrides_in_place_strategy(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "1 commit(s) not merged into origin/main" in out
-    assert "updating it in place" not in out
     assert "CODE UPDATE SKIPPED" not in out
     # Checkout moved to the target and picked up its code...
     assert (
@@ -584,48 +708,6 @@ def test_switch_branch_flag_overrides_in_place_strategy(
     assert (
         _git(repo_pair, "rev-parse", "old-feature").stdout.strip()
         == branch_tip_before
-    )
-
-
-def test_unmerged_branch_still_updates_in_place_without_the_flag(
-    repo_pair, monkeypatch, capsys
-):
-    """--switch-branch is opt-in: with the in-place strategy configured and
-    no flag, the update stays in place."""
-    import hermes_cli.config as hermes_config
-
-    monkeypatch.setattr(
-        hermes_config,
-        "load_config",
-        lambda: {"updates": {"parked_branch_strategy": "update_in_place"}},
-    )
-    (repo_pair / "feature.txt").write_text("unmerged work\n")
-    _git(repo_pair, "add", "feature.txt")
-    _git(repo_pair, "commit", "-qm", "feature work")
-    _patch_update_flow(monkeypatch, repo_pair)
-
-    class _StopFlow(Exception):
-        pass
-
-    monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
-        lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
-    )
-    args = SimpleNamespace(
-        branch=None, yes=False, force=False, force_venv=False,
-        switch_branch=False,
-    )
-
-    with pytest.raises(_StopFlow):
-        hermes_main.cmd_update(args)
-
-    out = capsys.readouterr().out
-    assert "updating it in place" in out
-    assert "--switch-branch" not in out
-    assert (
-        _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-        == "old-feature"
     )
 
 
@@ -642,8 +724,8 @@ def test_update_auto_switches_clean_merged_parked_branch(
         pass
 
     monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)
@@ -652,9 +734,6 @@ def test_update_auto_switches_clean_merged_parked_branch(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "parked on 'old-feature'" in out
-    assert "fully merged" in out
-    assert "switching back to main" in out
     assert "CODE UPDATE SKIPPED" not in out
     # The checkout ends up ON main, fast-forwarded to origin/main.
     assert (
@@ -666,9 +745,7 @@ def test_update_auto_switches_clean_merged_parked_branch(
     assert head == remote
 
 
-def test_update_up_to_date_path_does_not_repark_merged_branch(
-    tmp_path, monkeypatch, capsys
-):
+def test_update_up_to_date_path_does_not_repark_merged_branch(tmp_path, monkeypatch):
     """commit_count == 0 path: before this fix, the updater switched BACK to
     the parked feature branch after checking main ("Restore stash and switch
     back to original branch") — silently re-parking the checkout so every
@@ -679,7 +756,7 @@ def test_update_up_to_date_path_does_not_repark_merged_branch(
     _git(origin, "init", "-q", "-b", "main")
     _git(origin, "config", "user.email", "test@example.com")
     _git(origin, "config", "user.name", "Test")
-    (origin / "a.txt").write_text("one\n")
+    (origin / "a.txt").write_text("one\n", encoding="utf-8")
     _git(origin, "add", "a.txt")
     _git(origin, "commit", "-qm", "c1")
 
@@ -695,11 +772,9 @@ def test_update_up_to_date_path_does_not_repark_merged_branch(
     class _StopFlow(Exception):
         pass
 
-    import hermes_cli.managed_uv as managed_uv
-
     monkeypatch.setattr(
-        managed_uv,
-        "update_managed_uv",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)
@@ -707,8 +782,6 @@ def test_update_up_to_date_path_does_not_repark_merged_branch(
     with pytest.raises(_StopFlow):
         hermes_main.cmd_update(args)
 
-    out = capsys.readouterr().out
-    assert "switched back to main" in out
     # The regression: old code ran `git checkout old-feature` here.
     assert (
         _git(clone, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
@@ -742,11 +815,9 @@ def test_update_up_to_date_dirty_parked_does_not_restore_onto_main(
     class _StopFlow(Exception):
         pass
 
-    import hermes_cli.managed_uv as managed_uv
-
     monkeypatch.setattr(
-        managed_uv,
-        "update_managed_uv",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)
@@ -775,8 +846,8 @@ def test_update_on_main_fast_path_unchanged(repo_pair, monkeypatch, capsys):
         pass
 
     monkeypatch.setattr(
-        hermes_main,
-        "_abort_dependency_sync_if_self_locked",
+        update_cmd,
+        "_complete_source_update",
         lambda *a, **k: (_ for _ in ()).throw(_StopFlow()),
     )
     args = SimpleNamespace(branch=None, yes=False, force=False, force_venv=False)

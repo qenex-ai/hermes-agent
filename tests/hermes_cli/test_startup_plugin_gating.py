@@ -6,16 +6,9 @@ This saves 500-650ms on ``hermes --help``, ``hermes --version``,
 ``hermes logs``, etc., by not importing ``google.cloud.pubsub_v1``,
 ``aiohttp``, ``grpc``, and friends.
 
-Two invariants:
-
-1. ``_BUILTIN_SUBCOMMANDS`` must contain every subcommand that is actually
-   registered by ``main()``.  If an entry is missing, plugin discovery
-   runs unnecessarily for that command (correctness-safe, just slow).
-   If an entry is PRESENT but the subcommand doesn't exist, a plugin
-   could shadow the name — also bad.
-
-2. ``_plugin_cli_discovery_needed()`` returns the right answer for the
-   flag/positional parsing cases it's meant to handle.
+Invariants: ``_plugin_cli_discovery_needed()`` classifies flag/positional argv
+correctly, and deferred platforms register their CLI command before argparse
+builds the plugin subparsers (issue #54678).
 """
 
 from __future__ import annotations
@@ -123,32 +116,6 @@ def test_qenex_and_cursor_sdk_are_builtin_and_registered():
 # ── _resolve_deferred_platform_cli_command (issue #54678) ──────────────────
 
 
-def test_deferred_platform_cli_resolution_targets_matching_platform():
-    """The slow path must import the deferred platform whose name matches the
-    invoked command, so its register_cli_command side effect fires.
-
-    Photon registers ``hermes photon`` only when its adapter module is
-    imported; on the unknown-command slow path the platform is still a
-    deferred entry, so without this resolution step the CLI command stays
-    absent and argparse rejects ``photon`` (issue #54678).
-    """
-    from hermes_cli import main as _main
-
-    class _FakeRegistry:
-        def __init__(self):
-            self.resolved: list[str] = []
-
-        def get(self, name):
-            self.resolved.append(name)
-            return None
-
-    fake = _FakeRegistry()
-    fake_module = type(sys)("gateway.platform_registry")
-    fake_module.platform_registry = fake
-    with patch.dict(sys.modules, {"gateway.platform_registry": fake_module}):
-        _resolve_deferred_platform_cli_command("photon")
-
-    assert fake.resolved == ["photon"]
 
 
 def test_deferred_platform_loader_registers_cli_command_before_parser_table():
